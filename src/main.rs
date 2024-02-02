@@ -1,10 +1,11 @@
-use std::{cmp::max, collections::HashMap};
+use bevy::{prelude::*, window::PrimaryWindow};
+use derive_more::Add;
+use std::collections::HashMap;
 
-use bevy::{prelude::*, utils::dbg};
+mod constants;
+use constants::{HEX_DIRECTIONS, HEX_SIZE, PLAYER_SPEED};
 use itertools::Itertools;
 mod colors;
-const HEX_SIZE: f32 = 32.0;
-const PLAYER_SPEED: f32 = 500.0;
 
 fn main() {
     App::new()
@@ -15,13 +16,20 @@ fn main() {
             }),
             ..default()
         }))
-        .add_systems(Startup, (setup, spawn_map, spawn_player))
-        .add_systems(FixedUpdate, (move_player, render_hexes))
+        .init_resource::<WorldCoords>()
+        .add_systems(
+            Startup,
+            (setup, spawn_map, spawn_player, apply_deferred, populate_map).chain(),
+        )
+        .add_systems(
+            FixedUpdate,
+            (move_player, update_hexes, render_hexes, cursor_system),
+        )
         .run()
 }
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
-    commands.spawn((Camera2dBundle::default(),));
+    commands.spawn((Camera2dBundle::default(), MainCamera));
 }
 
 fn spawn_player(mut commands: Commands, asset_server: Res<AssetServer>) {
@@ -37,9 +45,53 @@ fn spawn_player(mut commands: Commands, asset_server: Res<AssetServer>) {
         },
     ));
 }
+
+#[derive(Component)]
+struct MainCamera;
+
+/// We will store the world position of the mouse cursor here.
+#[derive(Resource, Default)]
+struct WorldCoords(Vec2);
+
+fn cursor_system(
+    mut mycoords: ResMut<WorldCoords>,
+    // query to get the window (so we can read the current cursor position)
+    q_window: Query<&Window, With<PrimaryWindow>>,
+    // query to get camera transform
+    q_camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    q_hex_map: Query<&HexMap>,
+    mut q_hex_status: Query<&mut HexStatus>,
+) {
+    // get the camera info and transform
+    // assuming there is exactly one main camera entity, so Query::single() is OK
+    let (camera, camera_transform) = q_camera.single();
+
+    // There is only one primary window, so we can similarly get it from the query:
+    let window = q_window.single();
+
+    let hex_map = q_hex_map.single();
+
+    // check if the cursor is inside the window and get its position
+    // then, ask bevy to convert into world coordinates, and truncate to discard Z
+    if let Some(entity) = window.cursor_position().and_then(|cursor| {
+        if let Some(ray) = camera.viewport_to_world(camera_transform, cursor) {
+            let pixel_xy = ray.origin.truncate();
+            let hex_pos = HexPosition::from_pixel(pixel_xy);
+            hex_map.map.get(&hex_pos)
+        } else {
+            None
+        }
+    }) {
+        if let Ok(mut hex_status) = q_hex_status.get_mut(*entity) {
+            *hex_status = HexStatus::Selected;
+        }
+    }
+}
+
 #[derive(Component)]
 struct HexMap {
     size: i8,
+    map: HashMap<HexPosition, Entity>,
 }
 
 impl HexMap {
@@ -53,7 +105,7 @@ impl HexMap {
     }
 }
 
-#[derive(Component, PartialEq, PartialOrd, Ord, Eq, Debug, Clone, Copy)]
+#[derive(Component, PartialEq, PartialOrd, Ord, Eq, Debug, Clone, Copy, Hash, Add)]
 struct HexPosition {
     q: i8,
     r: i8,
@@ -68,6 +120,13 @@ impl HexPosition {
 #[derive(Component)]
 struct Player {
     hex: HexPosition,
+}
+
+#[derive(Component)]
+enum HexStatus {
+    Occupied,
+    Unoccupied,
+    Selected,
 }
 
 fn move_player(
@@ -94,17 +153,34 @@ fn move_player(
     player_transform.translation = new_player_pos;
 }
 
-fn render_hexes(
+fn update_hexes(
     player_query: Query<&Player, Changed<Player>>,
-    mut hex_query: Query<(&HexPosition, &mut Handle<Image>)>,
-    asset_server: Res<AssetServer>,
+    mut hex_query: Query<(&HexPosition, &mut HexStatus)>,
 ) {
     let player = player_query.single();
-    for (hex_pos, mut image_handle) in hex_query.iter_mut() {
-        if hex_pos == &player.hex {
-            *image_handle = asset_server.load("red_hex.png");
-        } else {
-            *image_handle = asset_server.load("blue_hex.png");
+    for (hex_pos, mut hex_status) in hex_query.iter_mut() {
+        let is_player_hex = hex_pos == &player.hex;
+        let is_neighbor = HEX_DIRECTIONS
+            .map(|delta| *hex_pos + delta)
+            .iter()
+            .any(|&n| n == player.hex);
+        match (is_player_hex, is_neighbor) {
+            (true, _) => *hex_status = HexStatus::Occupied,
+            (false, true) => *hex_status = HexStatus::Selected,
+            (false, false) => *hex_status = HexStatus::Unoccupied,
+        }
+    }
+}
+
+fn render_hexes(
+    mut hex_query: Query<(&HexStatus, &mut Handle<Image>)>,
+    asset_server: Res<AssetServer>,
+) {
+    for (hex_status, mut image_handle) in hex_query.iter_mut() {
+        match hex_status {
+            HexStatus::Occupied => *image_handle = asset_server.load("red_hex.png"),
+            HexStatus::Unoccupied => *image_handle = asset_server.load("blue_hex.png"),
+            HexStatus::Selected => *image_handle = asset_server.load("orange_hex.png"),
         }
     }
 }
@@ -152,9 +228,34 @@ impl HexPosition {
     }
 }
 
+#[derive(Bundle)]
+struct HexBundle {
+    pos: HexPosition,
+    status: HexStatus,
+    sprite: SpriteBundle,
+}
+
+#[derive(Bundle)]
+struct PlayerBundle {
+    pos: HexPosition,
+    status: HexStatus,
+    sprite: SpriteBundle,
+}
 fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) {
     let size = 4;
     let physical_map_size = f32::from(size) * HEX_SIZE;
+    let mut map = HashMap::new();
+    let hex_positions: Vec<HexPosition> = (-size..size)
+        .cartesian_product(-size..size)
+        .filter_map(|(q, r)| {
+            let s = -q - r;
+            if q + r + s == 0 {
+                Some(HexPosition::from_qr(q, r))
+            } else {
+                None
+            }
+        })
+        .collect();
     commands
         .spawn((
             SpriteBundle {
@@ -165,31 +266,33 @@ fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) {
                 },
                 ..default()
             },
-            HexMap { size },
+            HexMap { size, map },
         ))
         .with_children(|builder| {
-            (-size..size)
-                .cartesian_product(-size..size)
-                .filter_map(|(q, r)| {
-                    let s = -q - r;
-                    if q + r + s == 0 {
-                        Some(HexPosition::from_qr(q, r))
-                    } else {
-                        None
-                    }
-                })
-                .for_each({
-                    |hex| {
-                        let pos = hex.pixel_coords();
-                        builder.spawn((
-                            SpriteBundle {
-                                texture: asset_server.load("blue_hex.png"),
-                                transform: Transform::from_xyz(pos.x, pos.y, 1.0),
-                                ..default()
-                            },
-                            hex,
-                        ));
-                    }
-                });
+            hex_positions.iter().for_each({
+                |hex_pos| {
+                    builder.spawn(HexBundle {
+                        pos: *hex_pos,
+                        status: HexStatus::Unoccupied,
+                        sprite: SpriteBundle {
+                            texture: asset_server.load("blue_hex.png"),
+                            transform: Transform::from_xyz(
+                                hex_pos.pixel_coords().x,
+                                hex_pos.pixel_coords().y,
+                                1.0,
+                            ),
+                            ..default()
+                        },
+                    });
+                }
+            });
         });
+}
+
+fn populate_map(mut q_parent: Query<&mut HexMap>, q_child: Query<(Entity, &HexPosition)>) {
+    let mut hexmap = q_parent.single_mut();
+
+    for (entity, &hex_pos) in q_child.iter() {
+        hexmap.map.insert(hex_pos, entity);
+    }
 }
