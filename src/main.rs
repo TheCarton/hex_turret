@@ -1,4 +1,4 @@
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::{prelude::*, utils::dbg, window::PrimaryWindow};
 use derive_more::Add;
 use std::collections::HashMap;
 
@@ -22,7 +22,7 @@ fn main() {
             (setup, spawn_map, spawn_player, apply_deferred, populate_map).chain(),
         )
         .add_systems(
-            FixedUpdate,
+            Update,
             (move_player, update_hexes, render_hexes, cursor_system),
         )
         .run()
@@ -40,21 +40,23 @@ fn spawn_player(mut commands: Commands, asset_server: Res<AssetServer>) {
 
             ..default()
         },
-        Player {
-            hex: HexPosition::from_pixel(Vec2::ZERO),
-        },
+        Player,
+        HexPosition::from_pixel(Vec2::ZERO),
     ));
 }
 
 #[derive(Component)]
 struct MainCamera;
 
+#[derive(Component)]
+struct Enemy;
+
 /// We will store the world position of the mouse cursor here.
 #[derive(Resource, Default)]
 struct WorldCoords(Vec2);
 
 fn cursor_system(
-    mut mycoords: ResMut<WorldCoords>,
+    mycoords: ResMut<WorldCoords>,
     // query to get the window (so we can read the current cursor position)
     q_window: Query<&Window, With<PrimaryWindow>>,
     // query to get camera transform
@@ -77,6 +79,7 @@ fn cursor_system(
         if let Some(ray) = camera.viewport_to_world(camera_transform, cursor) {
             let pixel_xy = ray.origin.truncate();
             let hex_pos = HexPosition::from_pixel(pixel_xy);
+            dbg!(hex_pos);
             hex_map.map.get(&hex_pos)
         } else {
             None
@@ -84,6 +87,8 @@ fn cursor_system(
     }) {
         if let Ok(mut hex_status) = q_hex_status.get_mut(*entity) {
             *hex_status = HexStatus::Selected;
+        } else {
+            panic!();
         }
     }
 }
@@ -118,9 +123,7 @@ impl HexPosition {
 }
 
 #[derive(Component)]
-struct Player {
-    hex: HexPosition,
-}
+struct Player;
 
 #[derive(Component)]
 enum HexStatus {
@@ -132,11 +135,10 @@ enum HexStatus {
 fn move_player(
     keyboard_input: Res<Input<KeyCode>>,
     mut player_transform_query: Query<&mut Transform, With<Player>>,
-    mut player_query: Query<&mut Player>,
+    mut player_hex_query: Query<&mut HexPosition, With<Player>>,
     time: Res<Time>,
 ) {
     let mut player_transform = player_transform_query.single_mut();
-    let mut player = player_query.single_mut();
     let direction = match keyboard_input.get_pressed().last() {
         Some(KeyCode::Left) => Vec3::new(-1.0, 0.0, 0.0),
         Some(KeyCode::Right) => Vec3::new(1.0, 0.0, 0.0),
@@ -149,21 +151,22 @@ fn move_player(
         player_transform.translation + direction * PLAYER_SPEED * time.delta_seconds();
 
     let new_hex = HexPosition::from_pixel(Vec2::new(new_player_pos.x, new_player_pos.y));
-    player.hex = new_hex;
+    let mut player_hex = player_hex_query.single_mut();
+    *player_hex = new_hex;
     player_transform.translation = new_player_pos;
 }
 
 fn update_hexes(
-    player_query: Query<&Player, Changed<Player>>,
+    player_hex_query: Query<&HexPosition, With<Player>>,
     mut hex_query: Query<(&HexPosition, &mut HexStatus)>,
 ) {
-    let player = player_query.single();
+    let player_hex = player_hex_query.single();
     for (hex_pos, mut hex_status) in hex_query.iter_mut() {
-        let is_player_hex = hex_pos == &player.hex;
+        let is_player_hex = hex_pos == player_hex;
         let is_neighbor = HEX_DIRECTIONS
             .map(|delta| *hex_pos + delta)
             .iter()
-            .any(|&n| n == player.hex);
+            .any(|&n| n == *player_hex);
         match (is_player_hex, is_neighbor) {
             (true, _) => *hex_status = HexStatus::Occupied,
             (false, true) => *hex_status = HexStatus::Selected,
@@ -244,7 +247,7 @@ struct PlayerBundle {
 fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) {
     let size = 4;
     let physical_map_size = f32::from(size) * HEX_SIZE;
-    let mut map = HashMap::new();
+    let map = HashMap::new();
     let hex_positions: Vec<HexPosition> = (-size..size)
         .cartesian_product(-size..size)
         .filter_map(|(q, r)| {
