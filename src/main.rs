@@ -1,11 +1,15 @@
-use bevy::{prelude::*, utils::dbg, window::PrimaryWindow};
-use derive_more::Add;
+use bevy::{prelude::*, window::PrimaryWindow};
 use std::collections::HashMap;
 
-mod constants;
-use constants::{HEX_DIRECTIONS, HEX_SIZE, PLAYER_SPEED};
-use itertools::Itertools;
 mod colors;
+mod constants;
+mod entities;
+mod init;
+
+use constants::{HEX_DIRECTIONS, HEX_SIZE, PLAYER_SPEED};
+use entities::*;
+use init::*;
+use itertools::Itertools;
 
 fn main() {
     App::new()
@@ -27,40 +31,6 @@ fn main() {
             (move_player, update_hexes, render_hexes, cursor_system),
         )
         .run()
-}
-
-fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
-    commands.spawn((Camera2dBundle::default(), MainCamera));
-}
-
-fn spawn_player(mut commands: Commands, asset_server: Res<AssetServer>) {
-    commands.spawn((
-        SpriteBundle {
-            texture: asset_server.load("triangle.png"),
-            transform: Transform::from_xyz(0.0, 0.0, 2.0),
-
-            ..default()
-        },
-        Player,
-        HexPosition::from_pixel(Vec2::ZERO),
-    ));
-}
-
-#[derive(Component)]
-struct MainCamera;
-
-#[derive(Component)]
-struct Enemy;
-
-/// We will store the world position of the mouse cursor here.
-#[derive(Resource, Default)]
-struct CursorWorldCoords {
-    pos: Vec2,
-}
-
-#[derive(Resource, Default)]
-struct CursorHexPosition {
-    hex: HexPosition,
 }
 
 fn cursor_system(
@@ -90,12 +60,6 @@ fn cursor_system(
     }
 }
 
-#[derive(Component)]
-struct HexMap {
-    size: i8,
-    map: HashMap<HexPosition, Entity>,
-}
-
 impl HexMap {
     fn contains(&self, hex: HexPosition) -> bool {
         let d = [hex.q, hex.r, hex.s()]
@@ -105,28 +69,6 @@ impl HexMap {
             .expect("hex has position.");
         d <= self.size
     }
-}
-
-#[derive(Component, PartialEq, PartialOrd, Ord, Eq, Debug, Clone, Copy, Hash, Add, Default)]
-struct HexPosition {
-    q: i8,
-    r: i8,
-}
-
-impl HexPosition {
-    fn s(&self) -> i8 {
-        -self.q - self.r
-    }
-}
-
-#[derive(Component)]
-struct Player;
-
-#[derive(Component)]
-enum HexStatus {
-    Occupied,
-    Unoccupied,
-    Selected,
 }
 
 fn move_player(
@@ -185,117 +127,5 @@ fn render_hexes(
             HexStatus::Unoccupied => *image_handle = asset_server.load("blue_hex.png"),
             HexStatus::Selected => *image_handle = asset_server.load("orange_hex.png"),
         }
-    }
-}
-
-fn cube_round(frac: Vec3) -> Vec3 {
-    let mut q = frac.x.round();
-    let mut r = frac.y.round();
-    let mut s = frac.z.round();
-
-    let q_diff = (q - frac.x).abs();
-    let r_diff = (r - frac.y).abs();
-    let s_diff = (s - frac.z).abs();
-
-    if q_diff > r_diff && q_diff > s_diff {
-        q = -r - s;
-    } else if r_diff > s_diff {
-        r = -q - s;
-    } else {
-        s = -q - r;
-    }
-    Vec3::new(q, r, s)
-}
-
-impl HexPosition {
-    fn pixel_coords(&self) -> Vec2 {
-        let x =
-            HEX_SIZE * (3f32.sqrt() * f32::from(self.q) + 3f32.sqrt() / 2f32 * f32::from(self.r));
-        let y = HEX_SIZE * (3f32 / 2f32 * f32::from(self.r));
-        Vec2::new(x, y)
-    }
-
-    fn from_qr(q: i8, r: i8) -> HexPosition {
-        HexPosition { q, r }
-    }
-
-    fn from_pixel(pixel_pos: Vec2) -> HexPosition {
-        let q = (3f32.sqrt() / 3f32 * pixel_pos.x - 1f32 / 3f32 * pixel_pos.y) / HEX_SIZE;
-        let r = (2f32 / 3f32 * pixel_pos.y) / HEX_SIZE;
-        let s = -q - r;
-        let rounded = cube_round(Vec3::new(q, r, s));
-        HexPosition {
-            q: rounded.x as i8,
-            r: rounded.y as i8,
-        }
-    }
-}
-
-#[derive(Bundle)]
-struct HexBundle {
-    pos: HexPosition,
-    status: HexStatus,
-    sprite: SpriteBundle,
-}
-
-#[derive(Bundle)]
-struct PlayerBundle {
-    pos: HexPosition,
-    status: HexStatus,
-    sprite: SpriteBundle,
-}
-fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let size = 4;
-    let physical_map_size = f32::from(size) * HEX_SIZE;
-    let map = HashMap::new();
-    let hex_positions: Vec<HexPosition> = (-size..size)
-        .cartesian_product(-size..size)
-        .filter_map(|(q, r)| {
-            let s = -q - r;
-            if q + r + s == 0 {
-                Some(HexPosition::from_qr(q, r))
-            } else {
-                None
-            }
-        })
-        .collect();
-    commands
-        .spawn((
-            SpriteBundle {
-                sprite: Sprite {
-                    color: colors::BOARD,
-                    custom_size: Some(Vec2::new(physical_map_size, physical_map_size)),
-                    ..default()
-                },
-                ..default()
-            },
-            HexMap { size, map },
-        ))
-        .with_children(|builder| {
-            hex_positions.iter().for_each({
-                |hex_pos| {
-                    builder.spawn(HexBundle {
-                        pos: *hex_pos,
-                        status: HexStatus::Unoccupied,
-                        sprite: SpriteBundle {
-                            texture: asset_server.load("blue_hex.png"),
-                            transform: Transform::from_xyz(
-                                hex_pos.pixel_coords().x,
-                                hex_pos.pixel_coords().y,
-                                1.0,
-                            ),
-                            ..default()
-                        },
-                    });
-                }
-            });
-        });
-}
-
-fn populate_map(mut q_parent: Query<&mut HexMap>, q_child: Query<(Entity, &HexPosition)>) {
-    let mut hexmap = q_parent.single_mut();
-
-    for (entity, &hex_pos) in q_child.iter() {
-        hexmap.map.insert(hex_pos, entity);
     }
 }
