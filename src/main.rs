@@ -16,7 +16,8 @@ fn main() {
             }),
             ..default()
         }))
-        .init_resource::<WorldCoords>()
+        .init_resource::<CursorWorldCoords>()
+        .init_resource::<CursorHexPosition>()
         .add_systems(
             Startup,
             (setup, spawn_map, spawn_player, apply_deferred, populate_map).chain(),
@@ -53,16 +54,22 @@ struct Enemy;
 
 /// We will store the world position of the mouse cursor here.
 #[derive(Resource, Default)]
-struct WorldCoords(Vec2);
+struct CursorWorldCoords {
+    pos: Vec2,
+}
+
+#[derive(Resource, Default)]
+struct CursorHexPosition {
+    hex: HexPosition,
+}
 
 fn cursor_system(
-    mycoords: ResMut<WorldCoords>,
+    mut cursor_coords: ResMut<CursorWorldCoords>,
+    mut cursor_hex: ResMut<CursorHexPosition>,
     // query to get the window (so we can read the current cursor position)
     q_window: Query<&Window, With<PrimaryWindow>>,
     // query to get camera transform
     q_camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
-    q_hex_map: Query<&HexMap>,
-    mut q_hex_status: Query<&mut HexStatus>,
 ) {
     // get the camera info and transform
     // assuming there is exactly one main camera entity, so Query::single() is OK
@@ -71,25 +78,15 @@ fn cursor_system(
     // There is only one primary window, so we can similarly get it from the query:
     let window = q_window.single();
 
-    let hex_map = q_hex_map.single();
-
     // check if the cursor is inside the window and get its position
     // then, ask bevy to convert into world coordinates, and truncate to discard Z
-    if let Some(entity) = window.cursor_position().and_then(|cursor| {
-        if let Some(ray) = camera.viewport_to_world(camera_transform, cursor) {
-            let pixel_xy = ray.origin.truncate();
-            let hex_pos = HexPosition::from_pixel(pixel_xy);
-            dbg!(hex_pos);
-            hex_map.map.get(&hex_pos)
-        } else {
-            None
-        }
-    }) {
-        if let Ok(mut hex_status) = q_hex_status.get_mut(*entity) {
-            *hex_status = HexStatus::Selected;
-        } else {
-            panic!();
-        }
+    if let Some(world_position) = window
+        .cursor_position()
+        .and_then(|cursor| camera.viewport_to_world(camera_transform, cursor))
+        .map(|ray| ray.origin.truncate())
+    {
+        cursor_coords.pos = world_position;
+        cursor_hex.hex = HexPosition::from_pixel(world_position);
     }
 }
 
@@ -110,7 +107,7 @@ impl HexMap {
     }
 }
 
-#[derive(Component, PartialEq, PartialOrd, Ord, Eq, Debug, Clone, Copy, Hash, Add)]
+#[derive(Component, PartialEq, PartialOrd, Ord, Eq, Debug, Clone, Copy, Hash, Add, Default)]
 struct HexPosition {
     q: i8,
     r: i8,
@@ -159,6 +156,7 @@ fn move_player(
 fn update_hexes(
     player_hex_query: Query<&HexPosition, With<Player>>,
     mut hex_query: Query<(&HexPosition, &mut HexStatus)>,
+    cursor_hex: Res<CursorHexPosition>,
 ) {
     let player_hex = player_hex_query.single();
     for (hex_pos, mut hex_status) in hex_query.iter_mut() {
@@ -167,10 +165,12 @@ fn update_hexes(
             .map(|delta| *hex_pos + delta)
             .iter()
             .any(|&n| n == *player_hex);
-        match (is_player_hex, is_neighbor) {
-            (true, _) => *hex_status = HexStatus::Occupied,
-            (false, true) => *hex_status = HexStatus::Selected,
-            (false, false) => *hex_status = HexStatus::Unoccupied,
+        let is_cursor = *hex_pos == cursor_hex.hex;
+        match (is_player_hex, is_neighbor, is_cursor) {
+            (true, _, _) => *hex_status = HexStatus::Occupied,
+            (false, true, _) => *hex_status = HexStatus::Selected,
+            (_, _, true) => *hex_status = HexStatus::Selected,
+            _ => *hex_status = HexStatus::Unoccupied,
         }
     }
 }
