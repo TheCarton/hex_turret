@@ -89,20 +89,24 @@ pub(crate) struct PlayerBundle {
     pub(crate) sprite: SpriteBundle,
 }
 
+#[derive(Resource)]
+pub(crate) struct EnemySpawnConfig {
+    pub(crate) timer: Timer,
+}
+
+#[derive(Bundle)]
+pub(crate) struct EnemyBundle {
+    pub(crate) enemy: Enemy,
+    pub(crate) pos: HexPosition,
+    pub(crate) sprite: SpriteBundle,
+}
+
 #[derive(Component)]
 pub(crate) struct MainCamera;
 
 #[derive(Component)]
 pub(crate) struct Enemy;
 
-#[derive(Bundle)]
-pub(crate) struct EnemyBundle {
-    pos: HexPosition,
-    status: HexStatus,
-    sprite: SpriteBundle,
-}
-
-/// We will store the world position of the mouse cursor here.
 #[derive(Resource, Default)]
 pub(crate) struct CursorWorldCoords {
     pub(crate) pos: Vec2,

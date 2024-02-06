@@ -1,3 +1,4 @@
+use crate::entities::*;
 use crate::*;
 use bevy::prelude::*;
 
@@ -12,6 +13,12 @@ pub(crate) fn spawn_player(mut commands: Commands, asset_server: Res<AssetServer
             ..default()
         },
     });
+}
+
+pub(crate) fn setup_enemy_spawning(mut commands: Commands) {
+    commands.insert_resource(EnemySpawnConfig {
+        timer: Timer::from_seconds(5f32, TimerMode::Repeating),
+    })
 }
 
 pub(crate) fn populate_map(

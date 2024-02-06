@@ -6,7 +6,7 @@ mod constants;
 mod entities;
 mod init;
 
-use constants::{HEX_DIRECTIONS, HEX_SIZE, PLAYER_SPEED};
+use constants::{ENEMY_SPEED, HEX_DIRECTIONS, HEX_SIZE, PLAYER_SPEED};
 use entities::*;
 use init::*;
 use itertools::Itertools;
@@ -24,13 +24,48 @@ fn main() {
         .init_resource::<CursorHexPosition>()
         .add_systems(
             Startup,
-            (setup, spawn_map, spawn_player, apply_deferred, populate_map).chain(),
+            (
+                setup,
+                spawn_map,
+                spawn_player,
+                setup_enemy_spawning,
+                apply_deferred,
+                populate_map,
+            )
+                .chain(),
         )
         .add_systems(
             Update,
-            (move_player, update_hexes, render_hexes, cursor_system),
+            (
+                move_player,
+                move_enemy,
+                spawn_enemies,
+                update_hexes,
+                render_hexes,
+                cursor_system,
+            ),
         )
         .run()
+}
+
+fn spawn_enemies(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    time: Res<Time>,
+    mut config: ResMut<EnemySpawnConfig>,
+) {
+    config.timer.tick(time.delta());
+    if config.timer.finished() {
+        commands.spawn(EnemyBundle {
+            enemy: Enemy,
+            pos: HexPosition::default(),
+            sprite: SpriteBundle {
+                texture: asset_server.load("enemy.png"),
+                transform: Transform::from_xyz(0f32, 0f32, 2f32),
+                ..default()
+            },
+        });
+    }
 }
 
 fn cursor_system(
@@ -93,6 +128,27 @@ fn move_player(
     let mut player_hex = player_hex_query.single_mut();
     *player_hex = new_hex;
     player_transform.translation = new_player_pos;
+}
+
+fn move_enemy(
+    mut param_set: ParamSet<(
+        Query<&Transform, With<Player>>,
+        Query<&mut Transform, With<Enemy>>,
+    )>,
+    time: Res<Time>,
+) {
+    let player_transform = param_set.p0().single().clone();
+    for mut enemy_transform in param_set.p1().iter_mut() {
+        dbg!(&enemy_transform.translation);
+        if let Some(n) =
+            (player_transform.translation - enemy_transform.translation).try_normalize()
+        {
+            let mut v = n * ENEMY_SPEED * time.delta_seconds();
+            v.z = 0f32;
+            enemy_transform.translation += v;
+        }
+        dbg!(&enemy_transform.translation);
+    }
 }
 
 fn update_hexes(
