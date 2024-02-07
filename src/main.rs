@@ -1,12 +1,15 @@
 use bevy::{prelude::*, window::PrimaryWindow};
-use std::collections::HashMap;
+use std::{cmp::Ordering, collections::HashMap};
 
 mod colors;
 mod constants;
 mod entities;
 mod init;
 
-use constants::{ENEMY_SPEED, HEX_DIRECTIONS, HEX_SIZE, PLAYER_SPEED};
+use constants::{
+    ENEMY_SPEED, HEX_DIRECTIONS, HEX_SIZE, PLAYER_SPEED, PROJECTILE_RANGE, PROJECTILE_SPEED,
+    TRIGGER_RANGE, TURRET_RANGE,
+};
 use entities::*;
 use init::*;
 use itertools::Itertools;
@@ -40,6 +43,11 @@ fn main() {
                 move_player,
                 move_enemy,
                 spawn_enemies,
+                spawn_turret_on_click,
+                fire_projectiles,
+                move_projectiles,
+                despawn_out_of_range_projectiles,
+                explode_enemies,
                 update_hexes,
                 render_hexes,
                 cursor_system,
@@ -48,20 +56,20 @@ fn main() {
         .run()
 }
 
-fn spawn_enemies(
+fn spawn_turret_on_click(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    time: Res<Time>,
-    mut config: ResMut<EnemySpawnConfig>,
+    cursor_hex: Res<CursorHexPosition>,
+    buttons: Res<Input<MouseButton>>,
 ) {
-    config.timer.tick(time.delta());
-    if config.timer.finished() {
-        commands.spawn(EnemyBundle {
-            enemy: Enemy,
-            pos: HexPosition::default(),
+    if buttons.just_pressed(MouseButton::Left) {
+        let turret_v = cursor_hex.hex.pixel_coords();
+        commands.spawn(TurretBundle {
+            turret: Turret,
+            pos: cursor_hex.hex,
             sprite: SpriteBundle {
-                texture: asset_server.load("enemy.png"),
-                transform: Transform::from_xyz(0f32, 0f32, 2f32),
+                texture: asset_server.load("turret.png"),
+                transform: Transform::from_xyz(turret_v.x, turret_v.y, 2f32),
                 ..default()
             },
         });
@@ -114,10 +122,10 @@ fn move_player(
 ) {
     let mut player_transform = player_transform_query.single_mut();
     let direction = match keyboard_input.get_pressed().last() {
-        Some(KeyCode::Left) => Vec3::new(-1.0, 0.0, 0.0),
-        Some(KeyCode::Right) => Vec3::new(1.0, 0.0, 0.0),
-        Some(KeyCode::Up) => Vec3::new(0.0, 1.0, 0.0),
-        Some(KeyCode::Down) => Vec3::new(0.0, -1.0, 0.0),
+        Some(KeyCode::Left) | Some(KeyCode::A) => Vec3::new(-1.0, 0.0, 0.0),
+        Some(KeyCode::Right) | Some(KeyCode::D) => Vec3::new(1.0, 0.0, 0.0),
+        Some(KeyCode::Up) | Some(KeyCode::W) => Vec3::new(0.0, 1.0, 0.0),
+        Some(KeyCode::Down) | Some(KeyCode::S) => Vec3::new(0.0, -1.0, 0.0),
         _ => Vec3::ZERO,
     };
 
@@ -128,6 +136,91 @@ fn move_player(
     let mut player_hex = player_hex_query.single_mut();
     *player_hex = new_hex;
     player_transform.translation = new_player_pos;
+}
+
+fn spawn_enemies(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    time: Res<Time>,
+    mut config: ResMut<EnemySpawnConfig>,
+) {
+    config.timer.tick(time.delta());
+    if config.timer.finished() {
+        commands.spawn(EnemyBundle {
+            enemy: Enemy,
+            pos: HexPosition::default(),
+            sprite: SpriteBundle {
+                texture: asset_server.load("enemy.png"),
+                transform: Transform::from_xyz(0f32, 0f32, 2f32),
+                ..default()
+            },
+        });
+    }
+}
+
+fn fire_projectiles(
+    mut commands: Commands,
+    q_turrets: Query<&Transform, With<Turret>>,
+    q_enemies: Query<&Transform, With<Enemy>>,
+    asset_server: Res<AssetServer>,
+) {
+    for turret in q_turrets.iter() {
+        let closest_enemy = q_enemies
+            .iter()
+            .map(|enemy| {
+                (
+                    enemy.translation,
+                    enemy.translation.distance(turret.translation),
+                )
+            })
+            .min_by(|(_, x), (_, y)| x.partial_cmp(y).expect("no NaNs"));
+        if let Some((target, dist)) = closest_enemy {
+            if dist < TURRET_RANGE {
+                let x = (target - turret.translation)
+                    .try_normalize()
+                    .unwrap_or(Vec3 {
+                        x: 1f32,
+                        y: 0f32,
+                        z: 0f32,
+                    });
+                let velocity = Velocity {
+                    v: x.truncate() * PROJECTILE_SPEED,
+                };
+                commands.spawn(ProjectileBundle {
+                    projectile: Projectile,
+                    velocity,
+                    sprite: SpriteBundle {
+                        texture: asset_server.load("projectile.png"),
+                        transform: *turret,
+                        ..default()
+                    },
+                    ..default()
+                });
+            }
+        }
+    }
+}
+
+fn move_projectiles(
+    mut q_projectiles: Query<(&mut Transform, &mut Distance, &Velocity, With<Projectile>)>,
+    time: Res<Time>,
+) {
+    for (mut trans, mut dist, vel, _) in &mut q_projectiles {
+        let v = Vec3::from(vel) * time.delta_seconds();
+        trans.translation += v;
+        dist.d += v.length();
+    }
+}
+
+fn despawn_out_of_range_projectiles(
+    mut commands: Commands,
+    q_projectiles: Query<(Entity, &Distance, With<Projectile>)>,
+) {
+    for (entity, dist, _) in &q_projectiles {
+        if dist.d > PROJECTILE_RANGE {
+            commands.entity(entity).despawn_recursive();
+        }
+    }
 }
 
 fn move_enemy(
@@ -148,6 +241,21 @@ fn move_enemy(
             enemy_transform.translation += v;
         }
         dbg!(&enemy_transform.translation);
+    }
+}
+
+fn explode_enemies(
+    mut commands: Commands,
+    mut param_set: ParamSet<(
+        Query<&Transform, With<Player>>,
+        Query<(Entity, &Transform, With<Enemy>)>,
+    )>,
+) {
+    let player_pos = param_set.p0().single().translation.clone();
+    for (enemy_entity, enemy_transform, _) in param_set.p1().iter_mut() {
+        if (player_pos - enemy_transform.translation).length() < TRIGGER_RANGE {
+            commands.entity(enemy_entity).despawn();
+        }
     }
 }
 

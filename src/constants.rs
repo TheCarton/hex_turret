@@ -4,6 +4,10 @@ use derive_more::Add;
 
 pub const HEX_SIZE: f32 = 32.0;
 pub const PLAYER_SPEED: f32 = 500.0;
+pub const PROJECTILE_SPEED: f32 = PLAYER_SPEED * 2f32;
+pub const PROJECTILE_RANGE: f32 = HEX_SIZE * 8f32;
+pub const TURRET_RANGE: f32 = HEX_SIZE * 6f32;
+pub const TRIGGER_RANGE: f32 = HEX_SIZE;
 
 pub const ENEMY_SPEED: f32 = PLAYER_SPEED / 2f32;
 

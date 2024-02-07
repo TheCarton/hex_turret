@@ -89,6 +89,63 @@ pub(crate) struct PlayerBundle {
     pub(crate) sprite: SpriteBundle,
 }
 
+#[derive(Component, Default)]
+pub(crate) struct Projectile;
+
+#[derive(Component, Default)]
+pub(crate) struct Velocity {
+    pub(crate) v: Vec2,
+}
+
+impl From<Vec2> for Velocity {
+    fn from(value: Vec2) -> Self {
+        Velocity { v: value }
+    }
+}
+
+impl From<Velocity> for Vec3 {
+    fn from(value: Velocity) -> Self {
+        Vec3::new(value.v.x, value.v.y, 0f32)
+    }
+}
+
+impl From<&Velocity> for Vec3 {
+    fn from(value: &Velocity) -> Self {
+        Vec3::new(value.v.x, value.v.y, 0f32)
+    }
+}
+
+impl From<Velocity> for Vec2 {
+    fn from(value: Velocity) -> Self {
+        Vec2::new(value.v.x, value.v.y)
+    }
+}
+
+impl From<&Velocity> for Vec2 {
+    fn from(value: &Velocity) -> Self {
+        Vec2::new(value.v.x, value.v.y)
+    }
+}
+
+#[derive(Component, Default, Add)]
+pub(crate) struct Distance {
+    pub(crate) d: f32,
+}
+
+impl From<f32> for Distance {
+    fn from(value: f32) -> Self {
+        Distance { d: value }
+    }
+}
+
+#[derive(Bundle, Default)]
+pub(crate) struct ProjectileBundle {
+    pub(crate) projectile: Projectile,
+    pub(crate) velocity: Velocity,
+    pub(crate) distance: Distance,
+    pub(crate) sprite: SpriteBundle,
+}
+
 #[derive(Resource)]
 pub(crate) struct EnemySpawnConfig {
     pub(crate) timer: Timer,
@@ -97,6 +154,16 @@ pub(crate) struct EnemySpawnConfig {
 #[derive(Bundle)]
 pub(crate) struct EnemyBundle {
     pub(crate) enemy: Enemy,
+    pub(crate) pos: HexPosition,
+    pub(crate) sprite: SpriteBundle,
+}
+
+#[derive(Component)]
+pub(crate) struct Turret;
+
+#[derive(Bundle)]
+pub(crate) struct TurretBundle {
+    pub(crate) turret: Turret,
     pub(crate) pos: HexPosition,
     pub(crate) sprite: SpriteBundle,
 }
