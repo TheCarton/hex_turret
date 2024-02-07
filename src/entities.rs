@@ -75,7 +75,7 @@ impl HexPosition {
 #[derive(Component)]
 pub(crate) struct Player;
 
-#[derive(Component)]
+#[derive(Component, Eq, PartialEq)]
 pub(crate) enum HexStatus {
     Occupied,
     Unoccupied,
@@ -138,12 +138,18 @@ impl From<f32> for Distance {
     }
 }
 
+#[derive(Component, Default)]
+pub(crate) struct Hit {
+    pub(crate) has_hit: bool,
+}
+
 #[derive(Bundle, Default)]
 pub(crate) struct ProjectileBundle {
     pub(crate) projectile: Projectile,
     pub(crate) velocity: Velocity,
     pub(crate) distance: Distance,
     pub(crate) sprite: SpriteBundle,
+    pub(crate) hit: Hit,
 }
 
 #[derive(Resource)]
@@ -151,10 +157,11 @@ pub(crate) struct EnemySpawnConfig {
     pub(crate) timer: Timer,
 }
 
-#[derive(Bundle)]
+#[derive(Bundle, Default)]
 pub(crate) struct EnemyBundle {
     pub(crate) enemy: Enemy,
     pub(crate) pos: HexPosition,
+    pub(crate) hit: Hit,
     pub(crate) sprite: SpriteBundle,
 }
 
@@ -171,7 +178,7 @@ pub(crate) struct TurretBundle {
 #[derive(Component)]
 pub(crate) struct MainCamera;
 
-#[derive(Component)]
+#[derive(Component, Default)]
 pub(crate) struct Enemy;
 
 #[derive(Resource, Default)]

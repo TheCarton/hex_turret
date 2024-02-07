@@ -1,3 +1,4 @@
+use bevy::sprite::collide_aabb::collide;
 use bevy::{prelude::*, window::PrimaryWindow};
 use std::{cmp::Ordering, collections::HashMap};
 
@@ -7,8 +8,8 @@ mod entities;
 mod init;
 
 use constants::{
-    ENEMY_SPEED, HEX_DIRECTIONS, HEX_SIZE, PLAYER_SPEED, PROJECTILE_RANGE, PROJECTILE_SPEED,
-    TRIGGER_RANGE, TURRET_RANGE,
+    ENEMY_SIZE, ENEMY_SPEED, HEX_DIRECTIONS, HEX_SIZE, PLAYER_SIZE, PLAYER_SPEED, PROJECTILE_RANGE,
+    PROJECTILE_SIZE, PROJECTILE_SPEED, TRIGGER_RANGE, TURRET_RANGE,
 };
 use entities::*;
 use init::*;
@@ -46,23 +47,94 @@ fn main() {
                 spawn_turret_on_click,
                 fire_projectiles,
                 move_projectiles,
-                despawn_out_of_range_projectiles,
-                explode_enemies,
+                despawn_projectiles,
+                despawn_hit_enemies,
                 update_hexes,
                 render_hexes,
                 cursor_system,
+                detect_proj_hits,
+                detect_enemy_hits,
             ),
         )
         .run()
 }
 
+fn despawn_hit_enemies(mut commands: Commands, q_enemies: Query<(Entity, &Hit, With<Enemy>)>) {
+    for (enemy_entity, hit, _) in &q_enemies {
+        if hit.has_hit {
+            commands.entity(enemy_entity).despawn();
+        }
+    }
+}
+
+fn detect_proj_hits(
+    mut q_enemies: Query<(
+        &Transform,
+        &mut Hit,
+        With<Enemy>,
+        Without<Projectile>,
+        Without<Player>,
+    )>,
+    mut q_projectiles: Query<(
+        &Transform,
+        &mut Hit,
+        With<Projectile>,
+        Without<Enemy>,
+        Without<Player>,
+    )>,
+) {
+    for (proj, mut proj_hit, _, _, _) in &mut q_projectiles {
+        for (enemy, mut enemy_hit, _, _, _) in &mut q_enemies {
+            let proj_hit_enemy = collide(
+                enemy.translation,
+                ENEMY_SIZE,
+                proj.translation,
+                PROJECTILE_SIZE,
+            )
+            .is_some();
+
+            if proj_hit_enemy {
+                proj_hit.has_hit = true;
+                enemy_hit.has_hit = true;
+                break;
+            }
+        }
+    }
+}
+
+fn detect_enemy_hits(
+    mut q_enemies: Query<(&Transform, &mut Hit, With<Enemy>, Without<Player>)>,
+    q_player: Query<(&Transform, With<Player>, Without<Enemy>)>,
+) {
+    let (player, _, _) = q_player.single();
+    for (enemy, mut enemy_hit, _, _) in &mut q_enemies {
+        enemy_hit.has_hit = collide(
+            enemy.translation,
+            ENEMY_SIZE,
+            player.translation,
+            PLAYER_SIZE,
+        )
+        .is_some();
+    }
+}
+
 fn spawn_turret_on_click(
     mut commands: Commands,
+    q_hex: Query<&HexStatus>,
+    q_hex_map: Query<&HexMap>,
     asset_server: Res<AssetServer>,
     cursor_hex: Res<CursorHexPosition>,
     buttons: Res<Input<MouseButton>>,
 ) {
-    if buttons.just_pressed(MouseButton::Left) {
+    let hex_map = q_hex_map.single();
+    if buttons.just_pressed(MouseButton::Left) && hex_map.contains(cursor_hex.hex) {
+        let hex_entity = hex_map.map.get(&cursor_hex.hex);
+        if q_hex
+            .get(*hex_entity.unwrap())
+            .is_ok_and(|hex_status| hex_status != &HexStatus::Unoccupied)
+        {
+            return;
+        }
         let turret_v = cursor_hex.hex.pixel_coords();
         commands.spawn(TurretBundle {
             turret: Turret,
@@ -105,12 +177,7 @@ fn cursor_system(
 
 impl HexMap {
     fn contains(&self, hex: HexPosition) -> bool {
-        let d = [hex.q, hex.r, hex.s()]
-            .into_iter()
-            .map(|v| v.abs())
-            .max()
-            .expect("hex has position.");
-        d <= self.size
+        self.map.contains_key(&hex)
     }
 }
 
@@ -154,6 +221,7 @@ fn spawn_enemies(
                 transform: Transform::from_xyz(0f32, 0f32, 2f32),
                 ..default()
             },
+            ..default()
         });
     }
 }
@@ -212,12 +280,12 @@ fn move_projectiles(
     }
 }
 
-fn despawn_out_of_range_projectiles(
+fn despawn_projectiles(
     mut commands: Commands,
-    q_projectiles: Query<(Entity, &Distance, With<Projectile>)>,
+    q_projectiles: Query<(Entity, &Distance, &Hit, With<Projectile>)>,
 ) {
-    for (entity, dist, _) in &q_projectiles {
-        if dist.d > PROJECTILE_RANGE {
+    for (entity, dist, hit, _) in &q_projectiles {
+        if dist.d > PROJECTILE_RANGE || hit.has_hit {
             commands.entity(entity).despawn_recursive();
         }
     }
@@ -244,25 +312,9 @@ fn move_enemy(
     }
 }
 
-fn explode_enemies(
-    mut commands: Commands,
-    mut param_set: ParamSet<(
-        Query<&Transform, With<Player>>,
-        Query<(Entity, &Transform, With<Enemy>)>,
-    )>,
-) {
-    let player_pos = param_set.p0().single().translation.clone();
-    for (enemy_entity, enemy_transform, _) in param_set.p1().iter_mut() {
-        if (player_pos - enemy_transform.translation).length() < TRIGGER_RANGE {
-            commands.entity(enemy_entity).despawn();
-        }
-    }
-}
-
 fn update_hexes(
     player_hex_query: Query<&HexPosition, With<Player>>,
     mut hex_query: Query<(&HexPosition, &mut HexStatus)>,
-    cursor_hex: Res<CursorHexPosition>,
 ) {
     let player_hex = player_hex_query.single();
     for (hex_pos, mut hex_status) in hex_query.iter_mut() {
@@ -271,11 +323,9 @@ fn update_hexes(
             .map(|delta| *hex_pos + delta)
             .iter()
             .any(|&n| n == *player_hex);
-        let is_cursor = *hex_pos == cursor_hex.hex;
-        match (is_player_hex, is_neighbor, is_cursor) {
-            (true, _, _) => *hex_status = HexStatus::Occupied,
-            (false, true, _) => *hex_status = HexStatus::Selected,
-            (_, _, true) => *hex_status = HexStatus::Selected,
+        match (is_player_hex, is_neighbor) {
+            (true, _) => *hex_status = HexStatus::Occupied,
+            (false, true) => *hex_status = HexStatus::Selected,
             _ => *hex_status = HexStatus::Unoccupied,
         }
     }
