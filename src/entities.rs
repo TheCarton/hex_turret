@@ -1,7 +1,7 @@
 use crate::constants::*;
 use std::collections::HashMap;
 
-use bevy::prelude::*;
+use bevy::{prelude::*, time::Stopwatch};
 use derive_more::Add;
 
 fn cube_round(frac: Vec3) -> Vec3 {
@@ -152,34 +152,145 @@ pub(crate) struct ProjectileBundle {
     pub(crate) hit: Hit,
 }
 
+#[derive(Component)]
+pub(crate) struct AnimationIndices {
+    pub(crate) first: usize,
+    pub(crate) last: usize,
+}
+
+impl Default for AnimationIndices {
+    fn default() -> Self {
+        AnimationIndices { first: 0, last: 0 }
+    }
+}
+
+impl AnimationIndices {
+    pub(crate) fn new(first: usize, last: usize) -> AnimationIndices {
+        AnimationIndices { first, last }
+    }
+
+    pub(crate) fn next_index(&self, prev_index: usize) -> usize {
+        (prev_index + 1) % self.last
+    }
+}
+
+#[derive(Component, Deref, DerefMut)]
+pub(crate) struct AnimationTimer {
+    pub(crate) timer: Timer,
+}
+
+impl Default for AnimationTimer {
+    fn default() -> Self {
+        AnimationTimer {
+            timer: Timer::from_seconds(0.1, TimerMode::Repeating),
+        }
+    }
+}
+
+#[derive(Bundle, Default)]
+pub(crate) struct FireflyBundle {
+    pub(crate) firefly: Firefly,
+    pub(crate) animation_state: FireflyAnimationState,
+    pub(crate) hit: Hit,
+    pub(crate) damaged_time: DamagedTime,
+    pub(crate) enemy: Enemy,
+    pub(crate) health: Health,
+    pub(crate) sprite: SpriteSheetBundle,
+    pub(crate) animation_indices: AnimationIndices,
+    pub(crate) animation_timer: AnimationTimer,
+}
+
+#[derive(Component, Default)]
+pub(crate) struct Enemy;
+
+impl Default for DamagedTime {
+    fn default() -> Self {
+        DamagedTime { time: None }
+    }
+}
+
+#[derive(Component, Default)]
+pub(crate) enum FireflyAnimationState {
+    #[default]
+    Normal,
+    Damaged,
+}
+
 #[derive(Resource)]
 pub(crate) struct EnemySpawnConfig {
     pub(crate) timer: Timer,
 }
 
-#[derive(Bundle, Default)]
-pub(crate) struct EnemyBundle {
-    pub(crate) enemy: Enemy,
-    pub(crate) pos: HexPosition,
-    pub(crate) hit: Hit,
-    pub(crate) sprite: SpriteBundle,
+#[derive(Component, Default)]
+pub(crate) struct Firefly;
+
+#[derive(Component)]
+pub(crate) struct DamagedTime {
+    pub(crate) time: Option<Timer>,
+}
+
+#[derive(Component, Default)]
+pub(crate) struct Turret;
+
+#[derive(Resource)]
+pub(crate) struct FireflySpriteSheet {
+    pub(crate) atlas: Handle<TextureAtlas>,
+}
+
+impl FromWorld for FireflySpriteSheet {
+    fn from_world(world: &mut World) -> Self {
+        let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
+        let texture_handle = asset_server.load("firefly_spritesheet.png");
+        let texture_atlas = TextureAtlas::from_grid(
+            texture_handle,
+            Vec2::new(48f32, 48f32),
+            3, // rows,
+            8, // cols,
+            None,
+            None,
+        );
+        let mut texture_atlases = world.get_resource_mut::<Assets<TextureAtlas>>().unwrap();
+        let texture_atlas_handle = texture_atlases.add(texture_atlas);
+        FireflySpriteSheet {
+            atlas: texture_atlas_handle,
+        }
+    }
 }
 
 #[derive(Component)]
-pub(crate) struct Turret;
+pub(crate) struct ReloadTimer {
+    pub(crate) timer: Timer,
+}
 
-#[derive(Bundle)]
+impl Default for ReloadTimer {
+    fn default() -> Self {
+        ReloadTimer {
+            timer: Timer::from_seconds(TURRET_RELOAD_SECONDS, TimerMode::Repeating),
+        }
+    }
+}
+
+#[derive(Bundle, Default)]
 pub(crate) struct TurretBundle {
     pub(crate) turret: Turret,
     pub(crate) pos: HexPosition,
     pub(crate) sprite: SpriteBundle,
+    pub(crate) reload_timer: ReloadTimer,
 }
 
 #[derive(Component)]
 pub(crate) struct MainCamera;
 
-#[derive(Component, Default)]
-pub(crate) struct Enemy;
+#[derive(Component)]
+pub(crate) struct Health {
+    pub(crate) hp: f32,
+}
+
+impl Default for Health {
+    fn default() -> Self {
+        Health { hp: ENEMY_HEALTH }
+    }
+}
 
 #[derive(Resource, Default)]
 pub(crate) struct CursorWorldCoords {

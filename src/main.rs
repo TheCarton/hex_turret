@@ -1,4 +1,5 @@
 use bevy::sprite::collide_aabb::collide;
+use bevy::time::Stopwatch;
 use bevy::{prelude::*, window::PrimaryWindow};
 use std::{cmp::Ordering, collections::HashMap};
 
@@ -7,10 +8,7 @@ mod constants;
 mod entities;
 mod init;
 
-use constants::{
-    ENEMY_SIZE, ENEMY_SPEED, HEX_DIRECTIONS, HEX_SIZE, PLAYER_SIZE, PLAYER_SPEED, PROJECTILE_RANGE,
-    PROJECTILE_SIZE, PROJECTILE_SPEED, TRIGGER_RANGE, TURRET_RANGE,
-};
+use constants::*;
 use entities::*;
 use init::*;
 use itertools::Itertools;
@@ -26,6 +24,7 @@ fn main() {
         }))
         .init_resource::<CursorWorldCoords>()
         .init_resource::<CursorHexPosition>()
+        .init_resource::<FireflySpriteSheet>()
         .add_systems(
             Startup,
             (
@@ -43,20 +42,32 @@ fn main() {
             (
                 move_player,
                 move_enemy,
-                spawn_enemies,
+                animate_sprite,
+                spawn_fireflies,
+                update_firefly_animation_state,
+                update_firefly_animation,
                 spawn_turret_on_click,
                 fire_projectiles,
                 move_projectiles,
                 despawn_projectiles,
+                despawn_dead_enemies,
                 despawn_hit_enemies,
                 update_hexes,
                 render_hexes,
                 cursor_system,
-                detect_proj_hits,
-                detect_enemy_hits,
+                detect_proj_enemy_collision,
+                detect_enemy_player_collision,
             ),
         )
         .run()
+}
+
+fn despawn_dead_enemies(mut commands: Commands, q_enemies: Query<(Entity, &Health, With<Enemy>)>) {
+    for (enemy_entity, health, _) in &q_enemies {
+        if health.hp <= 0f32 {
+            commands.entity(enemy_entity).despawn();
+        }
+    }
 }
 
 fn despawn_hit_enemies(mut commands: Commands, q_enemies: Query<(Entity, &Hit, With<Enemy>)>) {
@@ -67,24 +78,18 @@ fn despawn_hit_enemies(mut commands: Commands, q_enemies: Query<(Entity, &Hit, W
     }
 }
 
-fn detect_proj_hits(
+fn detect_proj_enemy_collision(
     mut q_enemies: Query<(
         &Transform,
-        &mut Hit,
+        &mut DamagedTime,
+        &mut Health,
         With<Enemy>,
         Without<Projectile>,
-        Without<Player>,
     )>,
-    mut q_projectiles: Query<(
-        &Transform,
-        &mut Hit,
-        With<Projectile>,
-        Without<Enemy>,
-        Without<Player>,
-    )>,
+    mut q_projectiles: Query<(&Transform, &mut Hit, With<Projectile>, Without<Enemy>)>,
 ) {
-    for (proj, mut proj_hit, _, _, _) in &mut q_projectiles {
-        for (enemy, mut enemy_hit, _, _, _) in &mut q_enemies {
+    for (proj, mut proj_hit, _, _) in &mut q_projectiles {
+        for (enemy, mut damage_dur, mut enemy_health, _, _) in &mut q_enemies {
             let proj_hit_enemy = collide(
                 enemy.translation,
                 ENEMY_SIZE,
@@ -95,26 +100,64 @@ fn detect_proj_hits(
 
             if proj_hit_enemy {
                 proj_hit.has_hit = true;
-                enemy_hit.has_hit = true;
+                enemy_health.hp -= PROJECTILE_DAMAGE;
+                damage_dur.time = Some(Timer::from_seconds(
+                    FIREFLY_HIT_ANIMATION_DURATION,
+                    TimerMode::Once,
+                ));
                 break;
             }
         }
     }
 }
 
-fn detect_enemy_hits(
+fn detect_enemy_player_collision(
     mut q_enemies: Query<(&Transform, &mut Hit, With<Enemy>, Without<Player>)>,
     q_player: Query<(&Transform, With<Player>, Without<Enemy>)>,
 ) {
     let (player, _, _) = q_player.single();
-    for (enemy, mut enemy_hit, _, _) in &mut q_enemies {
-        enemy_hit.has_hit = collide(
+    for (enemy, mut damaged_time, _, _) in &mut q_enemies {
+        damaged_time.has_hit = collide(
             enemy.translation,
             ENEMY_SIZE,
             player.translation,
             PLAYER_SIZE,
         )
         .is_some();
+    }
+}
+
+fn update_firefly_animation_state(
+    mut q_fireflies: Query<(&mut FireflyAnimationState, &mut DamagedTime, With<Firefly>)>,
+    time: Res<Time>,
+) {
+    //TODO: Fix logic for transition from normal animation cycle to hit animation cycle. We're going to
+    // incorrect animation indices right now.
+    for (mut animation_state, mut hit_timer, _) in q_fireflies.iter_mut() {
+        if let Some(timer) = &mut hit_timer.time {
+            timer.tick(time.delta());
+            if timer.finished() {
+                *animation_state = FireflyAnimationState::Normal;
+                hit_timer.time = None;
+            } else {
+                *animation_state = FireflyAnimationState::Damaged;
+            }
+        }
+    }
+}
+
+fn update_firefly_animation(
+    mut q_fireflies: Query<(
+        &FireflyAnimationState,
+        &mut AnimationIndices,
+        Changed<FireflyAnimationState>,
+    )>,
+) {
+    for (state, mut indices, _) in q_fireflies.iter_mut() {
+        *indices = match state {
+            FireflyAnimationState::Normal => AnimationIndices::new(0, 3),
+            FireflyAnimationState::Damaged => AnimationIndices::new(15, 17),
+        };
     }
 }
 
@@ -144,6 +187,7 @@ fn spawn_turret_on_click(
                 transform: Transform::from_xyz(turret_v.x, turret_v.y, 2f32),
                 ..default()
             },
+            ..default()
         });
     }
 }
@@ -205,22 +249,39 @@ fn move_player(
     player_transform.translation = new_player_pos;
 }
 
-fn spawn_enemies(
+fn animate_sprite(
+    time: Res<Time>,
+    mut query: Query<(
+        &AnimationIndices,
+        &mut AnimationTimer,
+        &mut TextureAtlasSprite,
+    )>,
+) {
+    for (indices, mut timer, mut sprite) in &mut query {
+        timer.tick(time.delta());
+        if timer.just_finished() {
+            sprite.index = indices.next_index(sprite.index);
+            dbg!(sprite.index);
+        }
+    }
+}
+
+fn spawn_fireflies(
     mut commands: Commands,
-    asset_server: Res<AssetServer>,
+    firefly_sprite_sheet: Res<FireflySpriteSheet>,
     time: Res<Time>,
     mut config: ResMut<EnemySpawnConfig>,
 ) {
     config.timer.tick(time.delta());
     if config.timer.finished() {
-        commands.spawn(EnemyBundle {
-            enemy: Enemy,
-            pos: HexPosition::default(),
-            sprite: SpriteBundle {
-                texture: asset_server.load("enemy.png"),
+        commands.spawn(FireflyBundle {
+            sprite: SpriteSheetBundle {
+                sprite: TextureAtlasSprite::new(0),
+                texture_atlas: firefly_sprite_sheet.atlas.clone(),
                 transform: Transform::from_xyz(0f32, 0f32, 2f32),
                 ..default()
             },
+            animation_indices: AnimationIndices::new(0, 3),
             ..default()
         });
     }
@@ -228,11 +289,17 @@ fn spawn_enemies(
 
 fn fire_projectiles(
     mut commands: Commands,
-    q_turrets: Query<&Transform, With<Turret>>,
+    mut q_turrets: Query<(&Transform, &mut ReloadTimer, With<Turret>)>,
     q_enemies: Query<&Transform, With<Enemy>>,
     asset_server: Res<AssetServer>,
+    time: Res<Time>,
 ) {
-    for turret in q_turrets.iter() {
+    for (turret, mut reload_timer, _) in q_turrets.iter_mut() {
+        reload_timer.timer.tick(time.delta());
+        if !reload_timer.timer.finished() {
+            continue;
+        }
+
         let closest_enemy = q_enemies
             .iter()
             .map(|enemy| {
@@ -300,7 +367,6 @@ fn move_enemy(
 ) {
     let player_transform = param_set.p0().single().clone();
     for mut enemy_transform in param_set.p1().iter_mut() {
-        dbg!(&enemy_transform.translation);
         if let Some(n) =
             (player_transform.translation - enemy_transform.translation).try_normalize()
         {
@@ -308,7 +374,6 @@ fn move_enemy(
             v.z = 0f32;
             enemy_transform.translation += v;
         }
-        dbg!(&enemy_transform.translation);
     }
 }
 
