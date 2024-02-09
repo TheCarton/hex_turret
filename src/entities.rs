@@ -1,5 +1,5 @@
 use crate::constants::*;
-use std::collections::HashMap;
+use std::{collections::HashMap, iter::Cycle};
 
 use bevy::{prelude::*, time::Stopwatch};
 use derive_more::Add;
@@ -152,25 +152,28 @@ pub(crate) struct ProjectileBundle {
     pub(crate) hit: Hit,
 }
 
-#[derive(Component)]
+#[derive(Component, Debug)]
 pub(crate) struct AnimationIndices {
-    pub(crate) first: usize,
-    pub(crate) last: usize,
+    pub(crate) cycle: Cycle<std::ops::Range<usize>>,
 }
 
 impl Default for AnimationIndices {
     fn default() -> Self {
-        AnimationIndices { first: 0, last: 0 }
+        AnimationIndices {
+            cycle: (0usize..1usize).into_iter().cycle(),
+        }
     }
 }
 
 impl AnimationIndices {
     pub(crate) fn new(first: usize, last: usize) -> AnimationIndices {
-        AnimationIndices { first, last }
+        AnimationIndices {
+            cycle: (first..last).cycle(),
+        }
     }
 
-    pub(crate) fn next_index(&self, prev_index: usize) -> usize {
-        (prev_index + 1) % self.last
+    pub(crate) fn next_index(&mut self) -> usize {
+        self.cycle.next().expect("cycle never empty")
     }
 }
 
@@ -190,7 +193,8 @@ impl Default for AnimationTimer {
 #[derive(Bundle, Default)]
 pub(crate) struct FireflyBundle {
     pub(crate) firefly: Firefly,
-    pub(crate) animation_state: FireflyAnimationState,
+    pub(crate) animation_state: CurrentFireflyAnimationState,
+    pub(crate) prev_animation_state: PrevFireflyAnimationState,
     pub(crate) hit: Hit,
     pub(crate) damaged_time: DamagedTime,
     pub(crate) enemy: Enemy,
@@ -209,11 +213,21 @@ impl Default for DamagedTime {
     }
 }
 
-#[derive(Component, Default)]
+#[derive(Default, PartialEq, Eq)]
 pub(crate) enum FireflyAnimationState {
     #[default]
     Normal,
     Damaged,
+}
+
+#[derive(Component, Default)]
+pub(crate) struct PrevFireflyAnimationState {
+    pub(crate) state: FireflyAnimationState,
+}
+
+#[derive(Component, Default)]
+pub(crate) struct CurrentFireflyAnimationState {
+    pub(crate) state: FireflyAnimationState,
 }
 
 #[derive(Resource)]

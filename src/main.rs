@@ -128,19 +128,32 @@ fn detect_enemy_player_collision(
 }
 
 fn update_firefly_animation_state(
-    mut q_fireflies: Query<(&mut FireflyAnimationState, &mut DamagedTime, With<Firefly>)>,
+    mut q_fireflies: Query<(
+        &mut CurrentFireflyAnimationState,
+        &mut PrevFireflyAnimationState,
+        &mut DamagedTime,
+        With<Firefly>,
+    )>,
     time: Res<Time>,
 ) {
     //TODO: Fix logic for transition from normal animation cycle to hit animation cycle. We're going to
     // incorrect animation indices right now.
-    for (mut animation_state, mut hit_timer, _) in q_fireflies.iter_mut() {
+    for (mut animation_state, mut prev_animation_state, mut hit_timer, _) in q_fireflies.iter_mut()
+    {
         if let Some(timer) = &mut hit_timer.time {
             timer.tick(time.delta());
             if timer.finished() {
-                *animation_state = FireflyAnimationState::Normal;
+                *animation_state = CurrentFireflyAnimationState {
+                    state: FireflyAnimationState::Normal,
+                };
+                *prev_animation_state = PrevFireflyAnimationState {
+                    state: FireflyAnimationState::Damaged,
+                };
                 hit_timer.time = None;
             } else {
-                *animation_state = FireflyAnimationState::Damaged;
+                *animation_state = CurrentFireflyAnimationState {
+                    state: FireflyAnimationState::Damaged,
+                };
             }
         }
     }
@@ -148,16 +161,19 @@ fn update_firefly_animation_state(
 
 fn update_firefly_animation(
     mut q_fireflies: Query<(
-        &FireflyAnimationState,
+        &CurrentFireflyAnimationState,
+        &PrevFireflyAnimationState,
         &mut AnimationIndices,
-        Changed<FireflyAnimationState>,
+        Changed<CurrentFireflyAnimationState>,
     )>,
 ) {
-    for (state, mut indices, _) in q_fireflies.iter_mut() {
-        *indices = match state {
-            FireflyAnimationState::Normal => AnimationIndices::new(0, 3),
-            FireflyAnimationState::Damaged => AnimationIndices::new(15, 17),
-        };
+    for (curr_anim, prev_anim, mut indices, _) in q_fireflies.iter_mut() {
+        if curr_anim.state != prev_anim.state {
+            *indices = match curr_anim.state {
+                FireflyAnimationState::Normal => AnimationIndices::new(0, 3),
+                FireflyAnimationState::Damaged => AnimationIndices::new(14, 17),
+            };
+        }
     }
 }
 
@@ -252,15 +268,18 @@ fn move_player(
 fn animate_sprite(
     time: Res<Time>,
     mut query: Query<(
-        &AnimationIndices,
+        &mut AnimationIndices,
         &mut AnimationTimer,
         &mut TextureAtlasSprite,
     )>,
 ) {
-    for (indices, mut timer, mut sprite) in &mut query {
+    for (mut indices, mut timer, mut sprite) in query.iter_mut() {
         timer.tick(time.delta());
         if timer.just_finished() {
-            sprite.index = indices.next_index(sprite.index);
+            dbg!(sprite.index);
+            dbg!(indices.next_index());
+            dbg!(indices.next_index());
+            sprite.index = indices.next_index();
             dbg!(sprite.index);
         }
     }
