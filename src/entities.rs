@@ -213,7 +213,7 @@ impl Default for DamagedTime {
     }
 }
 
-#[derive(Default, PartialEq, Eq)]
+#[derive(Default, PartialEq, Eq, Copy, Clone)]
 pub(crate) enum FireflyAnimationState {
     #[default]
     Normal,
@@ -255,14 +255,8 @@ impl FromWorld for FireflySpriteSheet {
     fn from_world(world: &mut World) -> Self {
         let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
         let texture_handle = asset_server.load("firefly_spritesheet.png");
-        let texture_atlas = TextureAtlas::from_grid(
-            texture_handle,
-            Vec2::new(48f32, 48f32),
-            3, // rows,
-            8, // cols,
-            None,
-            None,
-        );
+        let texture_atlas =
+            TextureAtlas::from_grid(texture_handle, Vec2::new(48f32, 48f32), 8, 3, None, None);
         let mut texture_atlases = world.get_resource_mut::<Assets<TextureAtlas>>().unwrap();
         let texture_atlas_handle = texture_atlases.add(texture_atlas);
         FireflySpriteSheet {

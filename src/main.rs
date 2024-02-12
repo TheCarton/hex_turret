@@ -162,17 +162,18 @@ fn update_firefly_animation_state(
 fn update_firefly_animation(
     mut q_fireflies: Query<(
         &CurrentFireflyAnimationState,
-        &PrevFireflyAnimationState,
+        &mut PrevFireflyAnimationState,
         &mut AnimationIndices,
         Changed<CurrentFireflyAnimationState>,
     )>,
 ) {
-    for (curr_anim, prev_anim, mut indices, _) in q_fireflies.iter_mut() {
+    for (curr_anim, mut prev_anim, mut indices, _) in q_fireflies.iter_mut() {
         if curr_anim.state != prev_anim.state {
             *indices = match curr_anim.state {
                 FireflyAnimationState::Normal => AnimationIndices::new(0, 3),
-                FireflyAnimationState::Damaged => AnimationIndices::new(14, 17),
+                FireflyAnimationState::Damaged => AnimationIndices::new(16, 19),
             };
+            prev_anim.state = curr_anim.state;
         }
     }
 }
@@ -277,8 +278,6 @@ fn animate_sprite(
         timer.tick(time.delta());
         if timer.just_finished() {
             dbg!(sprite.index);
-            dbg!(indices.next_index());
-            dbg!(indices.next_index());
             sprite.index = indices.next_index();
             dbg!(sprite.index);
         }
@@ -293,14 +292,15 @@ fn spawn_fireflies(
 ) {
     config.timer.tick(time.delta());
     if config.timer.finished() {
+        let mut anim_indices = AnimationIndices::new(0, 3);
         commands.spawn(FireflyBundle {
             sprite: SpriteSheetBundle {
-                sprite: TextureAtlasSprite::new(0),
+                sprite: TextureAtlasSprite::new(anim_indices.next_index()),
                 texture_atlas: firefly_sprite_sheet.atlas.clone(),
                 transform: Transform::from_xyz(0f32, 0f32, 2f32),
                 ..default()
             },
-            animation_indices: AnimationIndices::new(0, 3),
+            animation_indices: anim_indices,
             ..default()
         });
     }
