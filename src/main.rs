@@ -24,7 +24,8 @@ fn main() {
         }))
         .init_resource::<CursorWorldCoords>()
         .init_resource::<CursorHexPosition>()
-        .init_resource::<FireflySpriteSheet>()
+        .init_resource::<FireflyTextureAtlas>()
+        .init_resource::<TurretTextureAtlas>()
         .add_systems(
             Startup,
             (
@@ -48,6 +49,7 @@ fn main() {
                 update_firefly_animation,
                 spawn_turret_on_click,
                 fire_projectiles,
+                aim_turrets,
                 move_projectiles,
                 despawn_projectiles,
                 despawn_dead_enemies,
@@ -182,7 +184,7 @@ fn spawn_turret_on_click(
     mut commands: Commands,
     q_hex: Query<&HexStatus>,
     q_hex_map: Query<&HexMap>,
-    asset_server: Res<AssetServer>,
+    turret_sprite_sheet: Res<TurretTextureAtlas>,
     cursor_hex: Res<CursorHexPosition>,
     buttons: Res<Input<MouseButton>>,
 ) {
@@ -199,8 +201,8 @@ fn spawn_turret_on_click(
         commands.spawn(TurretBundle {
             turret: Turret,
             pos: cursor_hex.hex,
-            sprite: SpriteBundle {
-                texture: asset_server.load("turret.png"),
+            sprite: SpriteSheetBundle {
+                texture_atlas: turret_sprite_sheet.atlas.clone(),
                 transform: Transform::from_xyz(turret_v.x, turret_v.y, 2f32),
                 ..default()
             },
@@ -277,16 +279,14 @@ fn animate_sprite(
     for (mut indices, mut timer, mut sprite) in query.iter_mut() {
         timer.tick(time.delta());
         if timer.just_finished() {
-            dbg!(sprite.index);
             sprite.index = indices.next_index();
-            dbg!(sprite.index);
         }
     }
 }
 
 fn spawn_fireflies(
     mut commands: Commands,
-    firefly_sprite_sheet: Res<FireflySpriteSheet>,
+    firefly_sprite_sheet: Res<FireflyTextureAtlas>,
     time: Res<Time>,
     mut config: ResMut<EnemySpawnConfig>,
 ) {
@@ -306,40 +306,46 @@ fn spawn_fireflies(
     }
 }
 
-fn fire_projectiles(
-    mut commands: Commands,
-    mut q_turrets: Query<(&Transform, &mut ReloadTimer, With<Turret>)>,
-    q_enemies: Query<&Transform, With<Enemy>>,
-    asset_server: Res<AssetServer>,
-    time: Res<Time>,
+fn aim_turrets(
+    mut q_turrets: Query<(&Transform, &mut AimVec, With<Turret>, Without<Enemy>)>,
+    q_enemies: Query<(&Transform, With<Enemy>)>,
 ) {
-    for (turret, mut reload_timer, _) in q_turrets.iter_mut() {
-        reload_timer.timer.tick(time.delta());
-        if !reload_timer.timer.finished() {
-            continue;
-        }
-
+    for (turret, mut aim, _, _) in q_turrets.iter_mut() {
         let closest_enemy = q_enemies
             .iter()
-            .map(|enemy| {
+            .map(|(enemy, _)| {
                 (
                     enemy.translation,
                     enemy.translation.distance(turret.translation),
                 )
             })
             .min_by(|(_, x), (_, y)| x.partial_cmp(y).expect("no NaNs"));
-        if let Some((target, dist)) = closest_enemy {
-            if dist < TURRET_RANGE {
-                let x = (target - turret.translation)
-                    .try_normalize()
-                    .unwrap_or(Vec3 {
-                        x: 1f32,
-                        y: 0f32,
-                        z: 0f32,
-                    });
-                let velocity = Velocity {
-                    v: x.truncate() * PROJECTILE_SPEED,
-                };
+        if closest_enemy.is_some_and(|(_, dist)| dist < TURRET_RANGE) {
+            let (target, _) = closest_enemy.unwrap();
+            let aim_point = (target.truncate() - turret.translation.truncate()).try_normalize();
+            *aim = AimVec { v: aim_point }
+        } else {
+            *aim = AimVec::default();
+        }
+    }
+}
+
+fn fire_projectiles(
+    mut commands: Commands,
+    mut q_turrets: Query<(&mut Transform, &mut ReloadTimer, &AimVec, With<Turret>)>,
+    asset_server: Res<AssetServer>,
+    time: Res<Time>,
+) {
+    for (mut turret, mut reload_timer, aim_vec, _) in q_turrets.iter_mut() {
+        reload_timer.timer.tick(time.delta());
+
+        if let Some(aim_point) = aim_vec.v {
+            let velocity = Velocity {
+                v: aim_point * PROJECTILE_SPEED,
+            };
+            let rotate_to_enemy = Quat::from_rotation_arc(Vec3::Y, aim_point.extend(0f32));
+            turret.rotation = rotate_to_enemy;
+            if reload_timer.timer.finished() {
                 commands.spawn(ProjectileBundle {
                     projectile: Projectile,
                     velocity,

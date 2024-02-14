@@ -243,15 +243,23 @@ pub(crate) struct DamagedTime {
     pub(crate) time: Option<Timer>,
 }
 
+#[derive(Component)]
+pub(crate) enum HexDirections {
+    North,
+}
+
+#[derive(Component)]
+pub(crate) struct Antenna;
+
 #[derive(Component, Default)]
 pub(crate) struct Turret;
 
 #[derive(Resource)]
-pub(crate) struct FireflySpriteSheet {
+pub(crate) struct FireflyTextureAtlas {
     pub(crate) atlas: Handle<TextureAtlas>,
 }
 
-impl FromWorld for FireflySpriteSheet {
+impl FromWorld for FireflyTextureAtlas {
     fn from_world(world: &mut World) -> Self {
         let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
         let texture_handle = asset_server.load("firefly_spritesheet.png");
@@ -259,7 +267,7 @@ impl FromWorld for FireflySpriteSheet {
             TextureAtlas::from_grid(texture_handle, Vec2::new(48f32, 48f32), 8, 3, None, None);
         let mut texture_atlases = world.get_resource_mut::<Assets<TextureAtlas>>().unwrap();
         let texture_atlas_handle = texture_atlases.add(texture_atlas);
-        FireflySpriteSheet {
+        FireflyTextureAtlas {
             atlas: texture_atlas_handle,
         }
     }
@@ -278,12 +286,45 @@ impl Default for ReloadTimer {
     }
 }
 
+#[derive(Component)]
+pub(crate) struct AimVec {
+    pub(crate) v: Option<Vec2>,
+}
+
+impl Default for AimVec {
+    fn default() -> Self {
+        AimVec { v: None }
+    }
+}
+
 #[derive(Bundle, Default)]
 pub(crate) struct TurretBundle {
     pub(crate) turret: Turret,
     pub(crate) pos: HexPosition,
-    pub(crate) sprite: SpriteBundle,
+    pub(crate) sprite: SpriteSheetBundle,
     pub(crate) reload_timer: ReloadTimer,
+    pub(crate) aim: AimVec,
+    pub(crate) animation_indices: AnimationIndices,
+    pub(crate) animation_timer: AnimationTimer,
+}
+
+#[derive(Resource)]
+pub(crate) struct TurretTextureAtlas {
+    pub(crate) atlas: Handle<TextureAtlas>,
+}
+
+impl FromWorld for TurretTextureAtlas {
+    fn from_world(world: &mut World) -> Self {
+        let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
+        let texture_handle = asset_server.load("turret.png");
+        let texture_atlas =
+            TextureAtlas::from_grid(texture_handle, Vec2::new(64f32, 64f32), 1, 1, None, None);
+        let mut texture_atlases = world.get_resource_mut::<Assets<TextureAtlas>>().unwrap();
+        let texture_atlas_handle = texture_atlases.add(texture_atlas);
+        TurretTextureAtlas {
+            atlas: texture_atlas_handle,
+        }
+    }
 }
 
 #[derive(Component)]
