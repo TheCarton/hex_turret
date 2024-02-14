@@ -50,6 +50,7 @@ fn main() {
                 spawn_turret_on_click,
                 fire_projectiles,
                 aim_turrets,
+                turret_status_from_hex,
                 move_projectiles,
                 despawn_projectiles,
                 despawn_dead_enemies,
@@ -200,7 +201,6 @@ fn spawn_turret_on_click(
         let turret_v = cursor_hex.hex.pixel_coords();
         commands.spawn(TurretBundle {
             turret: Turret,
-            pos: cursor_hex.hex,
             sprite: SpriteSheetBundle {
                 texture_atlas: turret_sprite_sheet.atlas.clone(),
                 transform: Transform::from_xyz(turret_v.x, turret_v.y, 2f32),
@@ -307,10 +307,16 @@ fn spawn_fireflies(
 }
 
 fn aim_turrets(
-    mut q_turrets: Query<(&Transform, &mut AimVec, With<Turret>, Without<Enemy>)>,
+    mut q_turrets: Query<(
+        &Transform,
+        &mut AimVec,
+        &TurretStatus,
+        With<Turret>,
+        Without<Enemy>,
+    )>,
     q_enemies: Query<(&Transform, With<Enemy>)>,
 ) {
-    for (turret, mut aim, _, _) in q_turrets.iter_mut() {
+    for (turret, mut aim, status, _, _) in q_turrets.iter_mut() {
         let closest_enemy = q_enemies
             .iter()
             .map(|(enemy, _)| {
@@ -320,13 +326,35 @@ fn aim_turrets(
                 )
             })
             .min_by(|(_, x), (_, y)| x.partial_cmp(y).expect("no NaNs"));
-        if closest_enemy.is_some_and(|(_, dist)| dist < TURRET_RANGE) {
+        if closest_enemy.is_some_and(|(_, dist)| dist < TURRET_RANGE)
+            && *status == TurretStatus::Friendly
+        {
             let (target, _) = closest_enemy.unwrap();
             let aim_point = (target.truncate() - turret.translation.truncate()).try_normalize();
             *aim = AimVec { v: aim_point }
         } else {
             *aim = AimVec::default();
         }
+    }
+}
+
+fn turret_status_from_hex(
+    mut q_turrets: Query<(&Transform, &mut TurretStatus, With<Turret>)>,
+    q_hex: Query<&HexStatus>,
+    q_hex_map: Query<&HexMap>,
+) {
+    let hex_map = q_hex_map.single();
+    for (turret, mut turret_status, _) in q_turrets.iter_mut() {
+        let hex_entity = hex_map
+            .map
+            .get(&HexPosition::from_pixel(turret.translation.xy()))
+            .unwrap();
+        let hex_status = q_hex.get(*hex_entity).unwrap();
+        *turret_status = match hex_status {
+            HexStatus::Occupied => TurretStatus::Friendly,
+            HexStatus::Unoccupied => TurretStatus::Neutral,
+            HexStatus::Selected => TurretStatus::Friendly,
+        };
     }
 }
 

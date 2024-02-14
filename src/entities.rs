@@ -297,10 +297,18 @@ impl Default for AimVec {
     }
 }
 
+#[derive(Component, Default, Eq, PartialEq)]
+pub(crate) enum TurretStatus {
+    #[default]
+    Neutral,
+    Friendly,
+    Hostile,
+}
+
 #[derive(Bundle, Default)]
 pub(crate) struct TurretBundle {
     pub(crate) turret: Turret,
-    pub(crate) pos: HexPosition,
+    pub(crate) status: TurretStatus,
     pub(crate) sprite: SpriteSheetBundle,
     pub(crate) reload_timer: ReloadTimer,
     pub(crate) aim: AimVec,
