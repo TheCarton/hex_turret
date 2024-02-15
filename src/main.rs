@@ -1,7 +1,11 @@
 use bevy::sprite::collide_aabb::collide;
 use bevy::time::Stopwatch;
 use bevy::{prelude::*, window::PrimaryWindow};
+use rand::seq::SliceRandom;
+use std::collections::hash_map::RandomState;
 use std::{cmp::Ordering, collections::HashMap};
+
+use rand::Rng;
 
 mod colors;
 mod constants;
@@ -26,6 +30,7 @@ fn main() {
         .init_resource::<CursorHexPosition>()
         .init_resource::<FireflyTextureAtlas>()
         .init_resource::<TurretTextureAtlas>()
+        .init_resource::<FireflyFactoryTextureAtlas>()
         .add_systems(
             Startup,
             (
@@ -33,6 +38,7 @@ fn main() {
                 spawn_map,
                 spawn_player,
                 setup_enemy_spawning,
+                setup_factory_spawning,
                 apply_deferred,
                 populate_map,
             )
@@ -48,6 +54,7 @@ fn main() {
                 update_firefly_animation_state,
                 update_firefly_animation,
                 spawn_turret_on_click,
+                spawn_factories,
                 fire_projectiles,
                 aim_turrets,
                 turret_status_from_hex,
@@ -63,6 +70,15 @@ fn main() {
             ),
         )
         .run()
+}
+
+fn random_hex(hex_map: &HexMap) -> HexPosition {
+    let mut rng = rand::thread_rng();
+    let q = rng.gen_range(-hex_map.size..hex_map.size);
+    let r = rng.gen_range(-hex_map.size..hex_map.size);
+    let h = HexPosition::from_qr(q, r);
+    assert!(hex_map.contains(h));
+    h
 }
 
 fn despawn_dead_enemies(mut commands: Commands, q_enemies: Query<(Entity, &Health, With<Enemy>)>) {
@@ -288,16 +304,44 @@ fn spawn_fireflies(
     mut commands: Commands,
     firefly_sprite_sheet: Res<FireflyTextureAtlas>,
     time: Res<Time>,
-    mut config: ResMut<EnemySpawnConfig>,
+    mut q_factories: Query<(&Transform, &mut BuildTimer, With<FireflyFactory>)>,
 ) {
+    for (factory, mut build_timer, _) in q_factories.iter_mut() {
+        build_timer.timer.tick(time.delta());
+        if build_timer.timer.finished() {
+            let p = Vec3::new(factory.translation.x, factory.translation.y, 2f32);
+            let mut anim_indices = AnimationIndices::firefly_indices();
+            commands.spawn(FireflyBundle {
+                sprite: SpriteSheetBundle {
+                    sprite: TextureAtlasSprite::new(anim_indices.next_index()),
+                    texture_atlas: firefly_sprite_sheet.atlas.clone(),
+                    transform: Transform::from_translation(p),
+                    ..default()
+                },
+                animation_indices: anim_indices,
+                ..default()
+            });
+        }
+    }
+}
+
+fn spawn_factories(
+    mut commands: Commands,
+    factory_sprite_sheet: Res<FireflyFactoryTextureAtlas>,
+    time: Res<Time>,
+    mut config: ResMut<FactorySpawnConfig>,
+    q_hex_map: Query<&HexMap>,
+) {
+    let hex_map = q_hex_map.single();
+    let random_hex = random_hex(hex_map);
     config.timer.tick(time.delta());
     if config.timer.finished() {
-        let mut anim_indices = AnimationIndices::new(0, 3);
-        commands.spawn(FireflyBundle {
+        let mut anim_indices = AnimationIndices::default();
+        commands.spawn(FireflyFactoryBundle {
             sprite: SpriteSheetBundle {
                 sprite: TextureAtlasSprite::new(anim_indices.next_index()),
-                texture_atlas: firefly_sprite_sheet.atlas.clone(),
-                transform: Transform::from_xyz(0f32, 0f32, 2f32),
+                texture_atlas: factory_sprite_sheet.atlas.clone(),
+                transform: Transform::from_translation(random_hex.pixel_coords().extend(1f32)),
                 ..default()
             },
             animation_indices: anim_indices,
@@ -420,6 +464,7 @@ fn move_enemy(
 ) {
     let player_transform = param_set.p0().single().clone();
     for mut enemy_transform in param_set.p1().iter_mut() {
+        dbg!(&enemy_transform);
         if let Some(n) =
             (player_transform.translation - enemy_transform.translation).try_normalize()
         {

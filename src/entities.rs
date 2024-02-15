@@ -175,6 +175,12 @@ impl AnimationIndices {
     pub(crate) fn next_index(&mut self) -> usize {
         self.cycle.next().expect("cycle never empty")
     }
+
+    pub(crate) fn firefly_indices() -> AnimationIndices {
+        AnimationIndices {
+            cycle: (0..3).cycle(),
+        }
+    }
 }
 
 #[derive(Component, Deref, DerefMut)]
@@ -294,6 +300,75 @@ pub(crate) struct AimVec {
 impl Default for AimVec {
     fn default() -> Self {
         AimVec { v: None }
+    }
+}
+
+#[derive(Component, Default)]
+pub(crate) struct FireflyFactory;
+
+#[derive(Resource)]
+pub(crate) struct FireflyFactoryTextureAtlas {
+    pub(crate) atlas: Handle<TextureAtlas>,
+}
+
+#[derive(Component, Default)]
+pub(crate) struct PrevFactoryState {
+    state: FactoryAnimationState,
+}
+
+#[derive(Component, Default)]
+pub(crate) struct CurrentFactoryState {
+    state: FactoryAnimationState,
+}
+
+#[derive(Default)]
+pub(crate) enum FactoryAnimationState {
+    #[default]
+    Idle,
+    Opening,
+    Open,
+    Malfunctioning,
+}
+
+#[derive(Bundle, Default)]
+pub(crate) struct FireflyFactoryBundle {
+    pub(crate) fireflyfactory: FireflyFactory,
+    pub(crate) prev_animation_state: PrevFactoryState,
+    pub(crate) current_animation_state: CurrentFactoryState,
+    pub(crate) animation_indices: AnimationIndices,
+    pub(crate) animation_timer: AnimationTimer,
+    pub(crate) sprite: SpriteSheetBundle,
+    pub(crate) build_timer: BuildTimer,
+}
+
+#[derive(Resource)]
+pub(crate) struct FactorySpawnConfig {
+    pub(crate) timer: Timer,
+}
+#[derive(Component)]
+pub(crate) struct BuildTimer {
+    pub(crate) timer: Timer,
+}
+
+impl Default for BuildTimer {
+    fn default() -> Self {
+        BuildTimer {
+            timer: Timer::from_seconds(5f32, TimerMode::Repeating),
+        }
+    }
+}
+
+impl FromWorld for FireflyFactoryTextureAtlas {
+    fn from_world(world: &mut World) -> Self {
+        let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
+        let texture_handle = asset_server.load("firefly_factory_spritesheet.png");
+        let texture_atlas =
+            TextureAtlas::from_grid(texture_handle, Vec2::new(48f32, 48f32), 1, 1, None, None);
+        let mut texture_atlases = world.get_resource_mut::<Assets<TextureAtlas>>().unwrap();
+        let texture_atlas_handle = texture_atlases.add(texture_atlas);
+        FireflyFactoryTextureAtlas {
+            atlas: texture_atlas_handle,
+        }
     }
 }
 

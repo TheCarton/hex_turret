@@ -21,6 +21,11 @@ pub(crate) fn setup_enemy_spawning(mut commands: Commands) {
     })
 }
 
+pub(crate) fn setup_factory_spawning(mut commands: Commands) {
+    commands.insert_resource(FactorySpawnConfig {
+        timer: Timer::from_seconds(3f32, TimerMode::Repeating),
+    })
+}
 pub(crate) fn populate_map(
     mut q_parent: Query<&mut HexMap>,
     q_child: Query<(Entity, &HexPosition)>,
