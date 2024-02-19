@@ -1,15 +1,14 @@
 use bevy::sprite::collide_aabb::collide;
-use bevy::time::Stopwatch;
 use bevy::{prelude::*, window::PrimaryWindow};
-use rand::seq::SliceRandom;
+use hex::{random_hex, Hex, HexControl, HexMap, HexPlugin, HexPosition, HexStatus};
 use std::collections::hash_map::RandomState;
+use std::ops::Add;
 use std::{cmp::Ordering, collections::HashMap};
-
-use rand::Rng;
 
 mod colors;
 mod constants;
 mod entities;
+mod hex;
 mod init;
 
 use constants::*;
@@ -26,6 +25,7 @@ fn main() {
             }),
             ..default()
         }))
+        .add_plugins(HexPlugin)
         .init_resource::<CursorWorldCoords>()
         .init_resource::<CursorHexPosition>()
         .init_resource::<FireflyTextureAtlas>()
@@ -62,23 +62,13 @@ fn main() {
                 despawn_projectiles,
                 despawn_dead_enemies,
                 despawn_hit_enemies,
-                update_hexes,
-                render_hexes,
                 cursor_system,
                 detect_proj_enemy_collision,
                 detect_enemy_player_collision,
             ),
         )
+        .add_systems(Update, (player_control_hex))
         .run()
-}
-
-fn random_hex(hex_map: &HexMap) -> HexPosition {
-    let mut rng = rand::thread_rng();
-    let q = rng.gen_range(-hex_map.size..hex_map.size);
-    let r = rng.gen_range(-hex_map.size..hex_map.size);
-    let h = HexPosition::from_qr(q, r);
-    assert!(hex_map.contains(h));
-    h
 }
 
 fn despawn_dead_enemies(mut commands: Commands, q_enemies: Query<(Entity, &Health, With<Enemy>)>) {
@@ -210,7 +200,7 @@ fn spawn_turret_on_click(
         let hex_entity = hex_map.map.get(&cursor_hex.hex);
         if q_hex
             .get(*hex_entity.unwrap())
-            .is_ok_and(|hex_status| hex_status != &HexStatus::Unoccupied)
+            .is_ok_and(|hex_status| hex_status != &HexStatus::Neutral)
         {
             return;
         }
@@ -254,12 +244,6 @@ fn cursor_system(
     }
 }
 
-impl HexMap {
-    fn contains(&self, hex: HexPosition) -> bool {
-        self.map.contains_key(&hex)
-    }
-}
-
 fn move_player(
     keyboard_input: Res<Input<KeyCode>>,
     mut player_transform_query: Query<&mut Transform, With<Player>>,
@@ -282,6 +266,28 @@ fn move_player(
     let mut player_hex = player_hex_query.single_mut();
     *player_hex = new_hex;
     player_transform.translation = new_player_pos;
+}
+
+fn player_control_hex(
+    q_player_hex_control: Query<(
+        &HexControl,
+        &HexPosition,
+        Changed<HexPosition>,
+        With<Player>,
+        Without<Hex>,
+    )>,
+    mut q_player_hex: Query<(&mut HexControl, With<Hex>, Without<Player>)>,
+    q_hex_map: Query<&HexMap>,
+) {
+    //TODO: WHy does the middle hex not change colors?
+    let (player_control, player_pos, _, _, _) = q_player_hex_control.single();
+    let hex_map = q_hex_map.single();
+    let hex_id = hex_map.map.get(player_pos);
+    if let Some(h) = hex_id {
+        if let Ok((mut hex_control, _, _)) = q_player_hex.get_mut(*h) {
+            *hex_control = hex_control.add(*player_control);
+        }
+    }
 }
 
 fn animate_sprite(
@@ -395,9 +401,9 @@ fn turret_status_from_hex(
             .unwrap();
         let hex_status = q_hex.get(*hex_entity).unwrap();
         *turret_status = match hex_status {
-            HexStatus::Occupied => TurretStatus::Friendly,
-            HexStatus::Unoccupied => TurretStatus::Neutral,
-            HexStatus::Selected => TurretStatus::Friendly,
+            HexStatus::Blue => TurretStatus::Friendly,
+            HexStatus::Neutral => TurretStatus::Neutral,
+            HexStatus::Red => TurretStatus::Friendly,
         };
     }
 }
@@ -471,38 +477,6 @@ fn move_enemy(
             let mut v = n * ENEMY_SPEED * time.delta_seconds();
             v.z = 0f32;
             enemy_transform.translation += v;
-        }
-    }
-}
-
-fn update_hexes(
-    player_hex_query: Query<&HexPosition, With<Player>>,
-    mut hex_query: Query<(&HexPosition, &mut HexStatus)>,
-) {
-    let player_hex = player_hex_query.single();
-    for (hex_pos, mut hex_status) in hex_query.iter_mut() {
-        let is_player_hex = hex_pos == player_hex;
-        let is_neighbor = HEX_DIRECTIONS
-            .map(|delta| *hex_pos + delta)
-            .iter()
-            .any(|&n| n == *player_hex);
-        match (is_player_hex, is_neighbor) {
-            (true, _) => *hex_status = HexStatus::Occupied,
-            (false, true) => *hex_status = HexStatus::Selected,
-            _ => *hex_status = HexStatus::Unoccupied,
-        }
-    }
-}
-
-fn render_hexes(
-    mut hex_query: Query<(&HexStatus, &mut Handle<Image>)>,
-    asset_server: Res<AssetServer>,
-) {
-    for (hex_status, mut image_handle) in hex_query.iter_mut() {
-        match hex_status {
-            HexStatus::Occupied => *image_handle = asset_server.load("red_hex.png"),
-            HexStatus::Unoccupied => *image_handle = asset_server.load("blue_hex.png"),
-            HexStatus::Selected => *image_handle = asset_server.load("orange_hex.png"),
         }
     }
 }

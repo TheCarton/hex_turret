@@ -1,4 +1,5 @@
 use crate::entities::*;
+use crate::hex::HexBundle;
 use crate::*;
 use bevy::prelude::*;
 
@@ -12,6 +13,19 @@ pub(crate) fn spawn_player(mut commands: Commands, asset_server: Res<AssetServer
 
             ..default()
         },
+        hex_control: HexControl {
+            red: 100f32,
+            blue: 0f32,
+            neutral: 0f32,
+        },
+    });
+}
+
+pub(crate) fn spawn_player_hex_control(mut commands: Commands) {
+    commands.spawn(HexControl {
+        red: 0f32,
+        blue: 500f32,
+        neutral: 0f32,
     });
 }
 
@@ -73,7 +87,7 @@ pub(crate) fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) 
                 |hex_pos| {
                     builder.spawn(HexBundle {
                         pos: *hex_pos,
-                        status: HexStatus::Unoccupied,
+                        status: HexStatus::Neutral,
                         sprite: SpriteBundle {
                             texture: asset_server.load("blue_hex.png"),
                             transform: Transform::from_xyz(
@@ -83,6 +97,7 @@ pub(crate) fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) 
                             ),
                             ..default()
                         },
+                        ..default()
                     });
                 }
             });
