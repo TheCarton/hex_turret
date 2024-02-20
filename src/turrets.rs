@@ -2,10 +2,14 @@ use bevy::prelude::*;
 
 use crate::animation::AnimationIndices;
 use crate::animation::AnimationTimer;
+use crate::constants::PROJECTILE_SPEED;
+use crate::controls::CursorHexPosition;
+use crate::projectiles::Projectile;
+use crate::projectiles::ProjectileBundle;
+use crate::projectiles::Velocity;
 use crate::{
     constants::{TURRET_RANGE, TURRET_RELOAD_SECONDS},
     enemies::Enemy,
-    entities::CursorHexPosition,
     hex::{HexMap, HexPosition, HexStatus},
 };
 
@@ -13,9 +17,15 @@ pub(crate) struct TurretPlugin;
 
 impl Plugin for TurretPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<TurretTextureAtlas>();
         app.add_systems(
             Update,
-            (turret_status_from_hex, spawn_turret_on_click, aim_turrets),
+            (
+                turret_status_from_hex,
+                spawn_turret_on_click,
+                aim_turrets,
+                fire_turrets,
+            ),
         );
     }
 }
@@ -164,5 +174,36 @@ fn spawn_turret_on_click(
             },
             ..default()
         });
+    }
+}
+
+fn fire_turrets(
+    mut commands: Commands,
+    mut q_turrets: Query<(&mut Transform, &mut ReloadTimer, &AimVec, With<Turret>)>,
+    asset_server: Res<AssetServer>,
+    time: Res<Time>,
+) {
+    for (mut turret, mut reload_timer, aim_vec, _) in q_turrets.iter_mut() {
+        reload_timer.timer.tick(time.delta());
+
+        if let Some(aim_point) = aim_vec.v {
+            let velocity = Velocity {
+                v: aim_point * PROJECTILE_SPEED,
+            };
+            let rotate_to_enemy = Quat::from_rotation_arc(Vec3::Y, aim_point.extend(0f32));
+            turret.rotation = rotate_to_enemy;
+            if reload_timer.timer.finished() {
+                commands.spawn(ProjectileBundle {
+                    projectile: Projectile,
+                    velocity,
+                    sprite: SpriteBundle {
+                        texture: asset_server.load("projectile.png"),
+                        transform: *turret,
+                        ..default()
+                    },
+                    ..default()
+                });
+            }
+        }
     }
 }

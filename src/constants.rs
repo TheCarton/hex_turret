@@ -1,6 +1,5 @@
-use crate::HexPosition;
+use crate::hex::HexPosition;
 use ::bevy::prelude::*;
-use derive_more::Add;
 
 pub const HEX_SIZE: f32 = 32.0;
 

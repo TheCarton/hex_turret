@@ -12,6 +12,8 @@ pub(crate) struct EnemiesPlugin;
 
 impl Plugin for EnemiesPlugin {
     fn build(&self, app: &mut App) {
+        app.init_resource::<FireflyTextureAtlas>();
+        app.init_resource::<FireflyFactoryTextureAtlas>();
         app.add_systems(Startup, setup_factory_spawning);
         app.add_systems(
             Update,

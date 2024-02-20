@@ -7,9 +7,9 @@ use crate::enemies::{
     PrevFireflyAnimationState,
 };
 
-pub(crate) struct AnimationPlugin;
+pub(crate) struct HexTurretAnimationPlugin;
 
-impl Plugin for AnimationPlugin {
+impl Plugin for HexTurretAnimationPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Update,
