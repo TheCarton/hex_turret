@@ -1,20 +1,32 @@
+use animation::AnimationPlugin;
+use bevy::core_pipeline::core_3d::Camera3dDepthLoadOp;
 use bevy::sprite::collide_aabb::collide;
 use bevy::{prelude::*, window::PrimaryWindow};
+use camera::{CameraPluginHexTurret, MainCamera};
+use enemies::{
+    CurrentFireflyAnimationState, DamagedTime, EnemiesPlugin, Enemy, Firefly,
+    FireflyAnimationState, FireflyFactoryTextureAtlas, FireflyTextureAtlas, Health, Hit,
+    PrevFireflyAnimationState,
+};
 use hex::{random_hex, Hex, HexControl, HexMap, HexPlugin, HexPosition, HexStatus};
+use player::{Player, PlayerPlugin};
 use std::collections::hash_map::RandomState;
 use std::ops::Add;
 use std::{cmp::Ordering, collections::HashMap};
+use turrets::{AimVec, ReloadTimer, Turret, TurretPlugin, TurretTextureAtlas};
 
+mod animation;
+mod camera;
 mod colors;
 mod constants;
+mod enemies;
 mod entities;
 mod hex;
-mod init;
+mod player;
+mod turrets;
 
 use constants::*;
 use entities::*;
-use init::*;
-use itertools::Itertools;
 
 fn main() {
     App::new()
@@ -26,65 +38,27 @@ fn main() {
             ..default()
         }))
         .add_plugins(HexPlugin)
+        .add_plugins(CameraPluginHexTurret)
+        .add_plugins(PlayerPlugin)
+        .add_plugins(EnemiesPlugin)
+        .add_plugins(TurretPlugin)
+        .add_plugins(AnimationPlugin)
         .init_resource::<CursorWorldCoords>()
         .init_resource::<CursorHexPosition>()
         .init_resource::<FireflyTextureAtlas>()
         .init_resource::<TurretTextureAtlas>()
         .init_resource::<FireflyFactoryTextureAtlas>()
         .add_systems(
-            Startup,
-            (
-                setup,
-                spawn_map,
-                spawn_player,
-                setup_enemy_spawning,
-                setup_factory_spawning,
-                apply_deferred,
-                populate_map,
-            )
-                .chain(),
-        )
-        .add_systems(
             Update,
             (
-                move_player,
-                move_enemy,
-                animate_sprite,
-                spawn_fireflies,
-                update_firefly_animation_state,
-                update_firefly_animation,
-                spawn_turret_on_click,
-                spawn_factories,
                 fire_projectiles,
-                aim_turrets,
-                turret_status_from_hex,
                 move_projectiles,
                 despawn_projectiles,
-                despawn_dead_enemies,
-                despawn_hit_enemies,
                 cursor_system,
                 detect_proj_enemy_collision,
-                detect_enemy_player_collision,
             ),
         )
-        .add_systems(Update, (player_control_hex))
         .run()
-}
-
-fn despawn_dead_enemies(mut commands: Commands, q_enemies: Query<(Entity, &Health, With<Enemy>)>) {
-    for (enemy_entity, health, _) in &q_enemies {
-        if health.hp <= 0f32 {
-            commands.entity(enemy_entity).despawn();
-        }
-    }
-}
-
-fn despawn_hit_enemies(mut commands: Commands, q_enemies: Query<(Entity, &Hit, With<Enemy>)>) {
-    for (enemy_entity, hit, _) in &q_enemies {
-        if hit.has_hit {
-            commands.entity(enemy_entity).despawn();
-        }
-    }
 }
 
 fn detect_proj_enemy_collision(
@@ -120,103 +94,6 @@ fn detect_proj_enemy_collision(
     }
 }
 
-fn detect_enemy_player_collision(
-    mut q_enemies: Query<(&Transform, &mut Hit, With<Enemy>, Without<Player>)>,
-    q_player: Query<(&Transform, With<Player>, Without<Enemy>)>,
-) {
-    let (player, _, _) = q_player.single();
-    for (enemy, mut damaged_time, _, _) in &mut q_enemies {
-        damaged_time.has_hit = collide(
-            enemy.translation,
-            ENEMY_SIZE,
-            player.translation,
-            PLAYER_SIZE,
-        )
-        .is_some();
-    }
-}
-
-fn update_firefly_animation_state(
-    mut q_fireflies: Query<(
-        &mut CurrentFireflyAnimationState,
-        &mut PrevFireflyAnimationState,
-        &mut DamagedTime,
-        With<Firefly>,
-    )>,
-    time: Res<Time>,
-) {
-    //TODO: Fix logic for transition from normal animation cycle to hit animation cycle. We're going to
-    // incorrect animation indices right now.
-    for (mut animation_state, mut prev_animation_state, mut hit_timer, _) in q_fireflies.iter_mut()
-    {
-        if let Some(timer) = &mut hit_timer.time {
-            timer.tick(time.delta());
-            if timer.finished() {
-                *animation_state = CurrentFireflyAnimationState {
-                    state: FireflyAnimationState::Normal,
-                };
-                *prev_animation_state = PrevFireflyAnimationState {
-                    state: FireflyAnimationState::Damaged,
-                };
-                hit_timer.time = None;
-            } else {
-                *animation_state = CurrentFireflyAnimationState {
-                    state: FireflyAnimationState::Damaged,
-                };
-            }
-        }
-    }
-}
-
-fn update_firefly_animation(
-    mut q_fireflies: Query<(
-        &CurrentFireflyAnimationState,
-        &mut PrevFireflyAnimationState,
-        &mut AnimationIndices,
-        Changed<CurrentFireflyAnimationState>,
-    )>,
-) {
-    for (curr_anim, mut prev_anim, mut indices, _) in q_fireflies.iter_mut() {
-        if curr_anim.state != prev_anim.state {
-            *indices = match curr_anim.state {
-                FireflyAnimationState::Normal => AnimationIndices::new(0, 3),
-                FireflyAnimationState::Damaged => AnimationIndices::new(16, 19),
-            };
-            prev_anim.state = curr_anim.state;
-        }
-    }
-}
-
-fn spawn_turret_on_click(
-    mut commands: Commands,
-    q_hex: Query<&HexStatus>,
-    q_hex_map: Query<&HexMap>,
-    turret_sprite_sheet: Res<TurretTextureAtlas>,
-    cursor_hex: Res<CursorHexPosition>,
-    buttons: Res<Input<MouseButton>>,
-) {
-    let hex_map = q_hex_map.single();
-    if buttons.just_pressed(MouseButton::Left) && hex_map.contains(cursor_hex.hex) {
-        let hex_entity = hex_map.map.get(&cursor_hex.hex);
-        if q_hex
-            .get(*hex_entity.unwrap())
-            .is_ok_and(|hex_status| hex_status != &HexStatus::Neutral)
-        {
-            return;
-        }
-        let turret_v = cursor_hex.hex.pixel_coords();
-        commands.spawn(TurretBundle {
-            turret: Turret,
-            sprite: SpriteSheetBundle {
-                texture_atlas: turret_sprite_sheet.atlas.clone(),
-                transform: Transform::from_xyz(turret_v.x, turret_v.y, 2f32),
-                ..default()
-            },
-            ..default()
-        });
-    }
-}
-
 fn cursor_system(
     mut cursor_coords: ResMut<CursorWorldCoords>,
     mut cursor_hex: ResMut<CursorHexPosition>,
@@ -241,170 +118,6 @@ fn cursor_system(
     {
         cursor_coords.pos = world_position;
         cursor_hex.hex = HexPosition::from_pixel(world_position);
-    }
-}
-
-fn move_player(
-    keyboard_input: Res<Input<KeyCode>>,
-    mut player_transform_query: Query<&mut Transform, With<Player>>,
-    mut player_hex_query: Query<&mut HexPosition, With<Player>>,
-    time: Res<Time>,
-) {
-    let mut player_transform = player_transform_query.single_mut();
-    let direction = match keyboard_input.get_pressed().last() {
-        Some(KeyCode::Left) | Some(KeyCode::A) => Vec3::new(-1.0, 0.0, 0.0),
-        Some(KeyCode::Right) | Some(KeyCode::D) => Vec3::new(1.0, 0.0, 0.0),
-        Some(KeyCode::Up) | Some(KeyCode::W) => Vec3::new(0.0, 1.0, 0.0),
-        Some(KeyCode::Down) | Some(KeyCode::S) => Vec3::new(0.0, -1.0, 0.0),
-        _ => Vec3::ZERO,
-    };
-
-    let new_player_pos =
-        player_transform.translation + direction * PLAYER_SPEED * time.delta_seconds();
-
-    let new_hex = HexPosition::from_pixel(Vec2::new(new_player_pos.x, new_player_pos.y));
-    let mut player_hex = player_hex_query.single_mut();
-    *player_hex = new_hex;
-    player_transform.translation = new_player_pos;
-}
-
-fn player_control_hex(
-    q_player_hex_control: Query<(
-        &HexControl,
-        &HexPosition,
-        Changed<HexPosition>,
-        With<Player>,
-        Without<Hex>,
-    )>,
-    mut q_player_hex: Query<(&mut HexControl, With<Hex>, Without<Player>)>,
-    q_hex_map: Query<&HexMap>,
-) {
-    //TODO: WHy does the middle hex not change colors?
-    let (player_control, player_pos, _, _, _) = q_player_hex_control.single();
-    let hex_map = q_hex_map.single();
-    let hex_id = hex_map.map.get(player_pos);
-    if let Some(h) = hex_id {
-        if let Ok((mut hex_control, _, _)) = q_player_hex.get_mut(*h) {
-            *hex_control = hex_control.add(*player_control);
-        }
-    }
-}
-
-fn animate_sprite(
-    time: Res<Time>,
-    mut query: Query<(
-        &mut AnimationIndices,
-        &mut AnimationTimer,
-        &mut TextureAtlasSprite,
-    )>,
-) {
-    for (mut indices, mut timer, mut sprite) in query.iter_mut() {
-        timer.tick(time.delta());
-        if timer.just_finished() {
-            sprite.index = indices.next_index();
-        }
-    }
-}
-
-fn spawn_fireflies(
-    mut commands: Commands,
-    firefly_sprite_sheet: Res<FireflyTextureAtlas>,
-    time: Res<Time>,
-    mut q_factories: Query<(&Transform, &mut BuildTimer, With<FireflyFactory>)>,
-) {
-    for (factory, mut build_timer, _) in q_factories.iter_mut() {
-        build_timer.timer.tick(time.delta());
-        if build_timer.timer.finished() {
-            let p = Vec3::new(factory.translation.x, factory.translation.y, 2f32);
-            let mut anim_indices = AnimationIndices::firefly_indices();
-            commands.spawn(FireflyBundle {
-                sprite: SpriteSheetBundle {
-                    sprite: TextureAtlasSprite::new(anim_indices.next_index()),
-                    texture_atlas: firefly_sprite_sheet.atlas.clone(),
-                    transform: Transform::from_translation(p),
-                    ..default()
-                },
-                animation_indices: anim_indices,
-                ..default()
-            });
-        }
-    }
-}
-
-fn spawn_factories(
-    mut commands: Commands,
-    factory_sprite_sheet: Res<FireflyFactoryTextureAtlas>,
-    time: Res<Time>,
-    mut config: ResMut<FactorySpawnConfig>,
-    q_hex_map: Query<&HexMap>,
-) {
-    let hex_map = q_hex_map.single();
-    let random_hex = random_hex(hex_map);
-    config.timer.tick(time.delta());
-    if config.timer.finished() {
-        let mut anim_indices = AnimationIndices::default();
-        commands.spawn(FireflyFactoryBundle {
-            sprite: SpriteSheetBundle {
-                sprite: TextureAtlasSprite::new(anim_indices.next_index()),
-                texture_atlas: factory_sprite_sheet.atlas.clone(),
-                transform: Transform::from_translation(random_hex.pixel_coords().extend(1f32)),
-                ..default()
-            },
-            animation_indices: anim_indices,
-            ..default()
-        });
-    }
-}
-
-fn aim_turrets(
-    mut q_turrets: Query<(
-        &Transform,
-        &mut AimVec,
-        &TurretStatus,
-        With<Turret>,
-        Without<Enemy>,
-    )>,
-    q_enemies: Query<(&Transform, With<Enemy>)>,
-) {
-    for (turret, mut aim, status, _, _) in q_turrets.iter_mut() {
-        let closest_enemy = q_enemies
-            .iter()
-            .map(|(enemy, _)| {
-                (
-                    enemy.translation,
-                    enemy.translation.distance(turret.translation),
-                )
-            })
-            .min_by(|(_, x), (_, y)| x.partial_cmp(y).expect("no NaNs"));
-        if closest_enemy.is_some_and(|(_, dist)| dist < TURRET_RANGE)
-            && *status == TurretStatus::Friendly
-        {
-            let (target, _) = closest_enemy.unwrap();
-            let aim_point = (target.truncate() - turret.translation.truncate()).try_normalize();
-            *aim = AimVec { v: aim_point }
-        } else {
-            *aim = AimVec::default();
-        }
-    }
-}
-
-fn turret_status_from_hex(
-    mut q_turrets: Query<(&Transform, &mut TurretStatus, With<Turret>)>,
-    q_hex: Query<&HexStatus>,
-    q_hex_map: Query<&HexMap>,
-) {
-    let hex_map = q_hex_map.single();
-    for (turret, mut turret_status, _) in q_turrets.iter_mut() {
-        let hex_entity = hex_map
-            .map
-            .get(&HexPosition::from_pixel(turret.translation.xy()))
-            .unwrap();
-        let hex_status = q_hex.get(*hex_entity).unwrap();
-        *turret_status = match hex_status {
-            HexStatus::Blue => TurretStatus::Friendly,
-            HexStatus::Neutral => TurretStatus::Neutral,
-            HexStatus::Red => TurretStatus::Friendly,
-        };
     }
 }
 
@@ -457,26 +170,6 @@ fn despawn_projectiles(
     for (entity, dist, hit, _) in &q_projectiles {
         if dist.d > PROJECTILE_RANGE || hit.has_hit {
             commands.entity(entity).despawn_recursive();
-        }
-    }
-}
-
-fn move_enemy(
-    mut param_set: ParamSet<(
-        Query<&Transform, With<Player>>,
-        Query<&mut Transform, With<Enemy>>,
-    )>,
-    time: Res<Time>,
-) {
-    let player_transform = param_set.p0().single().clone();
-    for mut enemy_transform in param_set.p1().iter_mut() {
-        dbg!(&enemy_transform);
-        if let Some(n) =
-            (player_transform.translation - enemy_transform.translation).try_normalize()
-        {
-            let mut v = n * ENEMY_SPEED * time.delta_seconds();
-            v.z = 0f32;
-            enemy_transform.translation += v;
         }
     }
 }
