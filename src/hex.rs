@@ -1,17 +1,49 @@
 use bevy::prelude::*;
 use derive_more::Add;
 use itertools::Itertools;
-use std::collections::HashMap;
+use std::{
+    cmp::{max, min},
+    collections::HashMap,
+};
 
 use rand::Rng;
 
-use crate::{colors, constants::HEX_SIZE};
+use crate::{
+    colors,
+    constants::{CONTROL_DECAY, E, HEX_SIZE, NE, NW, SE, SW, W},
+};
+
 pub struct HexPlugin;
 
 impl Plugin for HexPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (spawn_map, apply_deferred, populate_map).chain());
         app.add_systems(Update, (update_hexes, render_hexes));
+        app.add_systems(FixedUpdate, decay_hex_control);
+    }
+}
+
+#[derive(Component, Default)]
+pub(crate) enum HexDirection {
+    NE,
+    #[default]
+    E,
+    SE,
+    SW,
+    W,
+    NW,
+}
+
+impl HexDirection {
+    pub(crate) fn to_hex(&self) -> HexPosition {
+        match self {
+            HexDirection::NE => NE,
+            HexDirection::E => E,
+            HexDirection::SE => SE,
+            HexDirection::SW => SW,
+            HexDirection::W => W,
+            HexDirection::NW => NW,
+        }
     }
 }
 
@@ -62,6 +94,13 @@ pub(crate) fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) 
                 }
             });
         });
+}
+
+fn decay_hex_control(mut hex_query: Query<&mut HexControl, With<Hex>>) {
+    for mut hex_control in hex_query.iter_mut() {
+        hex_control.red = (hex_control.red - CONTROL_DECAY).max(0f32);
+        hex_control.blue = (hex_control.blue - CONTROL_DECAY).max(0f32);
+    }
 }
 
 pub(crate) fn populate_map(

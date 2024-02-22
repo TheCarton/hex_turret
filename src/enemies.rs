@@ -2,9 +2,11 @@ use bevy::{prelude::*, sprite::collide_aabb::collide};
 
 use crate::animation::AnimationIndices;
 use crate::animation::AnimationTimer;
+use crate::turrets::BuildTimer;
+use crate::turrets::FactorySpawnConfig;
+use crate::turrets::FireflyFactory;
 use crate::{
     constants::{ENEMY_HEALTH, ENEMY_SIZE, ENEMY_SPEED, PLAYER_SIZE},
-    hex::{random_hex, HexMap},
     player::Player,
 };
 
@@ -13,7 +15,6 @@ pub(crate) struct EnemiesPlugin;
 impl Plugin for EnemiesPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FireflyTextureAtlas>();
-        app.init_resource::<FireflyFactoryTextureAtlas>();
         app.add_systems(Startup, setup_factory_spawning);
         app.add_systems(
             Update,
@@ -22,7 +23,6 @@ impl Plugin for EnemiesPlugin {
                 move_enemy,
                 despawn_dead_enemies,
                 detect_enemy_player_collision,
-                spawn_factories,
             ),
         );
     }
@@ -117,75 +117,6 @@ impl Default for Health {
     }
 }
 
-#[derive(Component, Default)]
-pub(crate) struct FireflyFactory;
-
-#[derive(Resource)]
-pub(crate) struct FireflyFactoryTextureAtlas {
-    pub(crate) atlas: Handle<TextureAtlas>,
-}
-
-#[derive(Component, Default)]
-pub(crate) struct PrevFactoryState {
-    state: FactoryAnimationState,
-}
-
-#[derive(Component, Default)]
-pub(crate) struct CurrentFactoryState {
-    state: FactoryAnimationState,
-}
-
-#[derive(Default)]
-pub(crate) enum FactoryAnimationState {
-    #[default]
-    Idle,
-    Opening,
-    Open,
-    Malfunctioning,
-}
-
-#[derive(Bundle, Default)]
-pub(crate) struct FireflyFactoryBundle {
-    pub(crate) fireflyfactory: FireflyFactory,
-    pub(crate) prev_animation_state: PrevFactoryState,
-    pub(crate) current_animation_state: CurrentFactoryState,
-    pub(crate) animation_indices: AnimationIndices,
-    pub(crate) animation_timer: AnimationTimer,
-    pub(crate) sprite: SpriteSheetBundle,
-    pub(crate) build_timer: BuildTimer,
-}
-
-#[derive(Resource)]
-pub(crate) struct FactorySpawnConfig {
-    pub(crate) timer: Timer,
-}
-#[derive(Component)]
-pub(crate) struct BuildTimer {
-    pub(crate) timer: Timer,
-}
-
-impl Default for BuildTimer {
-    fn default() -> Self {
-        BuildTimer {
-            timer: Timer::from_seconds(5f32, TimerMode::Repeating),
-        }
-    }
-}
-
-impl FromWorld for FireflyFactoryTextureAtlas {
-    fn from_world(world: &mut World) -> Self {
-        let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
-        let texture_handle = asset_server.load("firefly_factory_spritesheet.png");
-        let texture_atlas =
-            TextureAtlas::from_grid(texture_handle, Vec2::new(48f32, 48f32), 1, 1, None, None);
-        let mut texture_atlases = world.get_resource_mut::<Assets<TextureAtlas>>().unwrap();
-        let texture_atlas_handle = texture_atlases.add(texture_atlas);
-        FireflyFactoryTextureAtlas {
-            atlas: texture_atlas_handle,
-        }
-    }
-}
-
 fn move_enemy(
     mut param_set: ParamSet<(
         Query<&Transform, With<Player>>,
@@ -206,9 +137,12 @@ fn move_enemy(
     }
 }
 
-fn despawn_dead_enemies(mut commands: Commands, q_enemies: Query<(Entity, &Health, With<Enemy>)>) {
-    for (enemy_entity, health, _) in &q_enemies {
-        if health.hp <= 0f32 {
+fn despawn_dead_enemies(
+    mut commands: Commands,
+    q_enemies: Query<(Entity, &Health, &Hit, With<Enemy>)>,
+) {
+    for (enemy_entity, health, hit, _) in &q_enemies {
+        if health.hp <= 0f32 || hit.has_hit {
             commands.entity(enemy_entity).despawn();
         }
     }
@@ -219,8 +153,8 @@ fn detect_enemy_player_collision(
     q_player: Query<(&Transform, With<Player>, Without<Enemy>)>,
 ) {
     let (player, _, _) = q_player.single();
-    for (enemy, mut damaged_time, _, _) in &mut q_enemies {
-        damaged_time.has_hit = collide(
+    for (enemy, mut enemy_collision, _, _) in &mut q_enemies {
+        enemy_collision.has_hit = collide(
             enemy.translation,
             ENEMY_SIZE,
             player.translation,
@@ -252,30 +186,5 @@ fn spawn_fireflies(
                 ..default()
             });
         }
-    }
-}
-
-fn spawn_factories(
-    mut commands: Commands,
-    factory_sprite_sheet: Res<FireflyFactoryTextureAtlas>,
-    time: Res<Time>,
-    mut config: ResMut<FactorySpawnConfig>,
-    q_hex_map: Query<&HexMap>,
-) {
-    let hex_map = q_hex_map.single();
-    let random_hex = random_hex(hex_map);
-    config.timer.tick(time.delta());
-    if config.timer.finished() {
-        let mut anim_indices = AnimationIndices::default();
-        commands.spawn(FireflyFactoryBundle {
-            sprite: SpriteSheetBundle {
-                sprite: TextureAtlasSprite::new(anim_indices.next_index()),
-                texture_atlas: factory_sprite_sheet.atlas.clone(),
-                transform: Transform::from_translation(random_hex.pixel_coords().extend(1f32)),
-                ..default()
-            },
-            animation_indices: anim_indices,
-            ..default()
-        });
     }
 }

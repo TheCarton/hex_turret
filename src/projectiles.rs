@@ -3,7 +3,6 @@ use crate::constants::{
     PROJECTILE_SIZE,
 };
 use crate::enemies::{DamagedTime, Enemy, Health, Hit};
-use crate::hex::*;
 
 use bevy::prelude::*;
 use bevy::sprite::collide_aabb::collide;

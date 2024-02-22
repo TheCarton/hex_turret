@@ -2,6 +2,7 @@ use crate::hex::HexPosition;
 use ::bevy::prelude::*;
 
 pub const HEX_SIZE: f32 = 32.0;
+pub const CONTROL_DECAY: f32 = 10f32;
 
 pub const PLAYER_SPEED: f32 = 500.0;
 pub const PLAYER_SIZE: Vec2 = Vec2::new(28f32, 16f32);
