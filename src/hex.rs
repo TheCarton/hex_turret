@@ -18,7 +18,7 @@ pub struct HexPlugin;
 impl Plugin for HexPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (spawn_map, apply_deferred, populate_map).chain());
-        app.add_systems(Update, (update_hexes, render_hexes));
+        app.add_systems(Update, (update_hexes, change_hex_color));
         app.add_systems(FixedUpdate, decay_hex_control);
     }
 }
@@ -51,17 +51,10 @@ pub(crate) fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) 
     let size = 4;
     let physical_map_size = f32::from(size) * HEX_SIZE;
     let map = HashMap::new();
-    let hex_positions: Vec<HexPosition> = (-size..size)
-        .cartesian_product(-size..size)
-        .filter_map(|(q, r)| {
-            let s = -q - r;
-            if q + r + s == 0 {
-                Some(HexPosition::from_qr(q, r))
-            } else {
-                None
-            }
-        })
-        .collect();
+    let hex_positions: Vec<HexPosition> = (-size..size).fold(Vec::new(), |mut acc, q| {
+        (-size..size).for_each(|r| acc.push(HexPosition::from_qr(q, r)));
+        acc
+    });
     commands
         .spawn((
             SpriteBundle {
@@ -110,6 +103,8 @@ pub(crate) fn populate_map(
     let mut hexmap = q_parent.single_mut();
 
     for (entity, &hex_pos) in q_child.iter() {
+        dbg!(entity);
+        dbg!(hex_pos);
         hexmap.map.insert(hex_pos, entity);
     }
 }
@@ -127,16 +122,12 @@ fn update_hexes(mut hex_query: Query<(&HexControl, &mut HexStatus)>) {
     }
 }
 
-fn render_hexes(
-    mut hex_query: Query<(&HexStatus, &mut Handle<Image>)>,
-    asset_server: Res<AssetServer>,
-) {
-    for (hex_status, mut image_handle) in hex_query.iter_mut() {
-        match hex_status {
-            HexStatus::Blue => *image_handle = asset_server.load("blue_hex.png"),
-            HexStatus::Neutral => *image_handle = asset_server.load("orange_hex.png"),
-            HexStatus::Red => *image_handle = asset_server.load("red_hex.png"),
-        }
+fn change_hex_color(mut hex_query: Query<(&HexControl, &mut Sprite, With<Hex>)>) {
+    for (control, mut sprite, _) in hex_query.iter_mut() {
+        let base = control.red + control.blue + control.neutral;
+        sprite.color.set_r(control.red / base);
+        sprite.color.set_b(control.blue / base);
+        sprite.color.set_g(control.neutral / base);
     }
 }
 pub(crate) fn random_hex(hex_map: &HexMap) -> HexPosition {

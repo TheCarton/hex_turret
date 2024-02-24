@@ -15,7 +15,8 @@ impl Plugin for PlayerPlugin {
             Startup,
             (spawn_player, spawn_player_hex_control, apply_deferred).chain(),
         );
-        app.add_systems(Update, (player_control_hex, move_player));
+        app.add_systems(Update, (move_player));
+        app.add_systems(FixedUpdate, player_control_hex);
     }
 }
 
@@ -59,7 +60,6 @@ fn player_control_hex(
     mut q_player_hex: Query<(&mut HexControl, With<Hex>, Without<Player>)>,
     q_hex_map: Query<&HexMap>,
 ) {
-    //TODO: WHy does the middle hex not change colors?
     let (player_control, player_pos, _, _, _) = q_player_hex_control.single();
     let hex_map = q_hex_map.single();
     let hex_id = hex_map.map.get(player_pos);

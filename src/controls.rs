@@ -92,6 +92,7 @@ fn spawn_structure_on_click(
     let hex_map = q_hex_map.single();
     if buttons.just_pressed(MouseButton::Left) && hex_map.contains(cursor_hex.hex) {
         let hex_entity = hex_map.map.get(&cursor_hex.hex);
+        dbg!(cursor_hex.hex);
         if q_hex
             .get(*hex_entity.unwrap())
             .is_ok_and(|hex_status| hex_status != &HexStatus::Neutral)

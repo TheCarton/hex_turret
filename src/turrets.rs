@@ -207,6 +207,9 @@ fn turret_status_from_hex(
 ) {
     let hex_map = q_hex_map.single();
     for (turret, mut turret_status, _) in q_turrets.iter_mut() {
+        dbg!(&hex_map.map);
+        let turret_hex = HexPosition::from_pixel(turret.translation.xy());
+        dbg!(turret_hex);
         let hex_entity = hex_map
             .map
             .get(&HexPosition::from_pixel(turret.translation.xy()))
