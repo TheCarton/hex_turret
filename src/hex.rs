@@ -21,7 +21,7 @@ impl Plugin for HexPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (spawn_map, apply_deferred, populate_map).chain());
         app.add_systems(Update, (update_hexes, change_hex_color));
-        app.add_systems(FixedUpdate, (diffuse_hex_control, decay_hex_control));
+        app.add_systems(FixedUpdate, (diffuse_hex_control));
     }
 }
 
@@ -118,12 +118,19 @@ fn diffuse_hex_control(world: &mut World) {
         for adj_pos in pos.neighbors() {
             if let Some(adj_entity) = hex_map.map.get(&adj_pos) {
                 let hex_entities: [Entity; 2] = [*entity, *adj_entity];
-                let [(_, mut hex_control, _), (_, adj_control, _)] = q_hexes.many_mut(hex_entities);
+                let [(_, mut hex_control, _), (_, mut adj_control, _)] =
+                    q_hexes.many_mut(hex_entities);
+                let prev_control = hex_control.clone();
                 for status in HexStatus::into_iter() {
-                    let delta = hex_control[status] - adj_control[status];
-                    match hex_control[status].total_cmp(&adj_control[status]) {
-                        Ordering::Less | Ordering::Greater => hex_control[status] += delta / 10f32,
-                        Ordering::Equal => {}
+                    match adj_control[status].total_cmp(&hex_control[status]) {
+                        Ordering::Less => {
+                            let percent_change =
+                                (prev_control[status] - adj_control[status]) / prev_control[status];
+                            let delta = prev_control[status] * (1f32 / 6f32) * percent_change;
+                            adj_control[status] += delta;
+                            hex_control[status] -= delta;
+                        }
+                        _ => {}
                     }
                 }
             }
