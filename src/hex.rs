@@ -1,16 +1,18 @@
-use bevy::prelude::*;
+use bevy::{ecs::system::SystemState, prelude::*};
 use derive_more::Add;
 use itertools::Itertools;
 use std::{
-    cmp::{max, min},
+    cmp::{max, min, Ordering},
     collections::HashMap,
+    ops::{Index, IndexMut},
+    slice::IterMut,
 };
 
 use rand::Rng;
 
 use crate::{
     colors,
-    constants::{CONTROL_DECAY, E, HEX_SIZE, NE, NW, SE, SW, W},
+    constants::{CONTROL_DECAY, E, HEX_DIRECTIONS, HEX_SIZE, NE, NW, SE, SW, W},
 };
 
 pub struct HexPlugin;
@@ -19,7 +21,7 @@ impl Plugin for HexPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (spawn_map, apply_deferred, populate_map).chain());
         app.add_systems(Update, (update_hexes, change_hex_color));
-        app.add_systems(FixedUpdate, decay_hex_control);
+        app.add_systems(FixedUpdate, (diffuse_hex_control, decay_hex_control));
     }
 }
 
@@ -55,6 +57,7 @@ pub(crate) fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) 
         (-size..size).for_each(|r| acc.push(HexPosition::from_qr(q, r)));
         acc
     });
+    dbg!(&hex_positions);
     commands
         .spawn((
             SpriteBundle {
@@ -93,32 +96,57 @@ fn decay_hex_control(mut hex_query: Query<&mut HexControl, With<Hex>>) {
     for mut hex_control in hex_query.iter_mut() {
         hex_control.red = (hex_control.red - CONTROL_DECAY).max(0f32);
         hex_control.blue = (hex_control.blue - CONTROL_DECAY).max(0f32);
+        hex_control.neutral -= (hex_control.red + hex_control.blue);
+    }
+}
+
+// life just streaks by you while you mumble moronic catchphrases.
+
+// I wish I could tell them that there was no God, but they never believed in one to begin with.
+// I have to reaquaint them with the entire illusion of modernity just to disillusion them.
+
+fn diffuse_hex_control(world: &mut World) {
+    let mut mut_system_state: SystemState<(
+        Query<(&HexPosition, &mut HexControl, With<Hex>)>,
+        Query<&HexMap>,
+    )> = SystemState::new(world);
+
+    let (mut q_hexes, q_hex_map) = mut_system_state.get_mut(world);
+    let hex_map = q_hex_map.single();
+
+    for (pos, entity) in hex_map.map.iter() {
+        for adj_pos in pos.neighbors() {
+            if let Some(adj_entity) = hex_map.map.get(&adj_pos) {
+                let hex_entities: [Entity; 2] = [*entity, *adj_entity];
+                let [(_, mut hex_control, _), (_, adj_control, _)] = q_hexes.many_mut(hex_entities);
+                for status in HexStatus::into_iter() {
+                    let delta = hex_control[status] - adj_control[status];
+                    match hex_control[status].total_cmp(&adj_control[status]) {
+                        Ordering::Less | Ordering::Greater => hex_control[status] += delta / 10f32,
+                        Ordering::Equal => {}
+                    }
+                }
+            }
+        }
     }
 }
 
 pub(crate) fn populate_map(
     mut q_parent: Query<&mut HexMap>,
-    q_child: Query<(Entity, &HexPosition)>,
+    q_child: Query<(Entity, &HexPosition, With<Hex>)>,
 ) {
     let mut hexmap = q_parent.single_mut();
 
-    for (entity, &hex_pos) in q_child.iter() {
+    for (entity, &hex_pos, _) in q_child.iter() {
         dbg!(entity);
         dbg!(hex_pos);
-        hexmap.map.insert(hex_pos, entity);
+        assert!(hexmap.map.insert(hex_pos, entity).is_none());
     }
 }
 
-fn update_hexes(mut hex_query: Query<(&HexControl, &mut HexStatus)>) {
-    //TODO: Switch to hashmap for updating hex status. Have hax status be based on control floats: red / blue.
-    // component: hex control component. has a struct of hex position and an effect on control, and a time of effect.
-    for (control, mut hex_status) in hex_query.iter_mut() {
-        let (faction, _) = control
-            .into_iter()
-            .max_by(|(_, x), (_, y)| x.total_cmp(y))
-            .expect("not empty");
-
-        *hex_status = faction;
+fn update_hexes(mut hex_query: Query<(&HexControl, &mut HexStatus, With<Hex>)>) {
+    for (control, mut hex_status, _) in hex_query.iter_mut() {
+        *hex_status = control.max_status();
     }
 }
 
@@ -151,12 +179,18 @@ pub(crate) struct HexBundle {
     pub(crate) control: HexControl,
 }
 
-#[derive(Component, Eq, PartialEq, Default)]
+#[derive(Component, Eq, PartialEq, Default, Clone, Copy, Debug)]
 pub(crate) enum HexStatus {
     Blue,
     #[default]
     Neutral,
     Red,
+}
+
+impl HexStatus {
+    fn into_iter() -> std::array::IntoIter<HexStatus, 3> {
+        [HexStatus::Red, HexStatus::Blue, HexStatus::Neutral].into_iter()
+    }
 }
 
 #[derive(Component, Debug, Copy, Clone, Add)]
@@ -176,18 +210,69 @@ impl Default for HexControl {
     }
 }
 
-impl IntoIterator for HexControl {
-    type Item = (HexStatus, f32);
+impl PartialOrd for HexControl {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        (self.red + self.blue + self.neutral)
+            .partial_cmp(&(&other.red + &other.blue + &other.neutral))
+    }
+}
 
-    type IntoIter = std::array::IntoIter<Self::Item, 3>;
+impl PartialEq for HexControl {
+    fn eq(&self, other: &Self) -> bool {
+        (self.red + self.blue + self.neutral) == (other.red + other.blue + other.neutral)
+    }
+}
 
-    fn into_iter(self) -> Self::IntoIter {
+impl Ord for HexControl {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.partial_cmp(other).expect("No NaNs in HexControl")
+    }
+}
+
+impl Eq for HexControl {} // weird.
+
+impl Index<HexStatus> for HexControl {
+    type Output = f32;
+
+    fn index(&self, status: HexStatus) -> &Self::Output {
+        match status {
+            HexStatus::Red => &self.red,
+            HexStatus::Blue => &self.blue,
+            HexStatus::Neutral => &self.neutral,
+        }
+    }
+}
+
+impl IndexMut<HexStatus> for HexControl {
+    fn index_mut(&mut self, status: HexStatus) -> &mut Self::Output {
+        match status {
+            HexStatus::Red => &mut self.red,
+            HexStatus::Blue => &mut self.blue,
+            HexStatus::Neutral => &mut self.neutral,
+        }
+    }
+}
+
+impl HexControl {
+    fn len() -> usize {
+        3
+    }
+
+    fn to_array(&self) -> [(HexStatus, f32); 3] {
         [
             (HexStatus::Red, self.red),
             (HexStatus::Blue, self.blue),
             (HexStatus::Neutral, self.neutral),
         ]
-        .into_iter()
+    }
+
+    fn max_status(&self) -> HexStatus {
+        let (status, _val) = self
+            .to_array()
+            .into_iter()
+            .max_by(|(_, x), (_, y)| x.total_cmp(y))
+            .expect("control values not empty");
+        status
     }
 }
 
@@ -234,6 +319,14 @@ impl HexPosition {
             q: rounded.x as i8,
             r: rounded.y as i8,
         }
+    }
+    pub(crate) fn neighbors(&self) -> [HexPosition; 6] {
+        let mut neighbors = [*self; 6];
+        for (n, d) in neighbors.iter_mut().zip(HEX_DIRECTIONS) {
+            *n = *n + d;
+        }
+        assert!(neighbors.iter().all(|n| n != self));
+        neighbors
     }
 }
 fn cube_round(frac: Vec3) -> Vec3 {
