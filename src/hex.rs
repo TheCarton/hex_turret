@@ -21,7 +21,7 @@ impl Plugin for HexPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (spawn_map, apply_deferred, populate_map).chain());
         app.add_systems(Update, (update_hexes, change_hex_color));
-        app.add_systems(FixedUpdate, (diffuse_hex_control));
+        app.add_systems(FixedUpdate, (diffuse_hex_control, decay_hex_control));
     }
 }
 
@@ -96,7 +96,6 @@ fn decay_hex_control(mut hex_query: Query<&mut HexControl, With<Hex>>) {
     for mut hex_control in hex_query.iter_mut() {
         hex_control.red = (hex_control.red - CONTROL_DECAY).max(0f32);
         hex_control.blue = (hex_control.blue - CONTROL_DECAY).max(0f32);
-        hex_control.neutral -= (hex_control.red + hex_control.blue);
     }
 }
 
@@ -105,33 +104,30 @@ fn decay_hex_control(mut hex_query: Query<&mut HexControl, With<Hex>>) {
 // I wish I could tell them that there was no God, but they never believed in one to begin with.
 // I have to reaquaint them with the entire illusion of modernity just to disillusion them.
 
-fn diffuse_hex_control(world: &mut World) {
-    let mut mut_system_state: SystemState<(
-        Query<(&HexPosition, &mut HexControl, With<Hex>)>,
-        Query<&HexMap>,
-    )> = SystemState::new(world);
-
-    let (mut q_hexes, q_hex_map) = mut_system_state.get_mut(world);
+fn diffuse_hex_control(
+    mut q_hexes: Query<(&HexPosition, &mut HexControl, With<Hex>)>,
+    q_hex_map: Query<&HexMap>,
+) {
     let hex_map = q_hex_map.single();
-
     for (pos, entity) in hex_map.map.iter() {
-        for adj_pos in pos.neighbors() {
-            if let Some(adj_entity) = hex_map.map.get(&adj_pos) {
-                let hex_entities: [Entity; 2] = [*entity, *adj_entity];
-                let [(_, mut hex_control, _), (_, mut adj_control, _)] =
-                    q_hexes.many_mut(hex_entities);
-                let prev_control = hex_control.clone();
-                for status in HexStatus::into_iter() {
-                    match adj_control[status].total_cmp(&hex_control[status]) {
-                        Ordering::Less => {
-                            let percent_change =
-                                (prev_control[status] - adj_control[status]) / prev_control[status];
-                            let delta = prev_control[status] * (1f32 / 6f32) * percent_change;
-                            adj_control[status] += delta;
-                            hex_control[status] -= delta;
-                        }
-                        _ => {}
-                    }
+        let neighbor_entities: Vec<&Entity> = pos
+            .neighbors()
+            .iter()
+            .filter_map(|n| hex_map.map.get(n))
+            .collect();
+        let num_neighbors = neighbor_entities.len() as f32;
+        for adj_entity in neighbor_entities {
+            let hex_entities: [Entity; 2] = [*entity, *adj_entity];
+            let [(_, mut hex_control, _), (_, mut adj_control, _)] = q_hexes.many_mut(hex_entities);
+            let prev_control = hex_control.clone();
+            for status_color in [HexStatus::Red, HexStatus::Blue] {
+                if adj_control[status_color] < hex_control[status_color] {
+                    let fraction_change = (prev_control[status_color] - adj_control[status_color])
+                        / prev_control[status_color];
+                    let max_share = 1f32 / (num_neighbors * 2f32);
+                    let delta = prev_control[status_color] * max_share * fraction_change;
+                    adj_control[status_color] += delta;
+                    hex_control[status_color] -= delta;
                 }
             }
         }
@@ -285,6 +281,7 @@ impl HexControl {
 
 #[derive(Component)]
 pub(crate) struct HexMap {
+    //TODO: Better data structure for this. I'm iterating through these keys.
     pub(crate) size: i8,
     pub(crate) map: HashMap<HexPosition, Entity>,
 }
