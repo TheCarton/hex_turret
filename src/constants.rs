@@ -3,6 +3,9 @@ use ::bevy::prelude::*;
 
 pub const HEX_SIZE: f32 = 32.0;
 pub const CONTROL_DECAY: f32 = 2.5f32;
+pub const RED_CONTROL_TARGET: f32 = 0f32;
+pub const BLUE_CONTROL_TARGET: f32 = 0f32;
+pub const NEUTRAL_CONTROL_TARGET: f32 = 100f32;
 
 pub const PLAYER_SPEED: f32 = 500.0;
 pub const PLAYER_SIZE: Vec2 = Vec2::new(28f32, 16f32);
@@ -14,6 +17,8 @@ pub const PROJECTILE_DAMAGE: f32 = 20f32;
 
 pub const TURRET_RANGE: f32 = HEX_SIZE * 6f32;
 pub const TURRET_RELOAD_SECONDS: f32 = 0.75;
+
+pub const ANTENNA_RANGE: i8 = 4;
 
 pub const TRIGGER_RANGE: f32 = HEX_SIZE;
 

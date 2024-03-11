@@ -1,18 +1,23 @@
 use bevy::{ecs::system::SystemState, prelude::*};
-use derive_more::Add;
+use derive_more::{Add, Sub};
 use itertools::Itertools;
 use std::{
     cmp::{max, min, Ordering},
     collections::HashMap,
-    ops::{Index, IndexMut},
+    ops::{Index, IndexMut, Mul, Sub},
     slice::IterMut,
+    sync::Arc,
 };
 
 use rand::Rng;
 
 use crate::{
     colors,
-    constants::{CONTROL_DECAY, E, HEX_DIRECTIONS, HEX_SIZE, NE, NW, SE, SW, W},
+    constants::{
+        BLUE_CONTROL_TARGET, CONTROL_DECAY, E, HEX_DIRECTIONS, HEX_SIZE, NE, NW,
+        RED_CONTROL_TARGET, SE, SW, W,
+    },
+    turrets::{ControlRay, ControlVec},
 };
 
 pub struct HexPlugin;
@@ -20,7 +25,14 @@ pub struct HexPlugin;
 impl Plugin for HexPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, (spawn_map, apply_deferred, populate_map).chain());
-        app.add_systems(Update, (update_hexes, change_hex_color));
+        app.add_systems(
+            Update,
+            (
+                update_hexes,
+                update_hex_control_from_control_rays,
+                change_hex_color,
+            ),
+        );
         app.add_systems(FixedUpdate, (diffuse_hex_control, decay_hex_control));
     }
 }
@@ -57,7 +69,6 @@ pub(crate) fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) 
         (-size..size).for_each(|r| acc.push(HexPosition::from_qr(q, r)));
         acc
     });
-    dbg!(&hex_positions);
     commands
         .spawn((
             SpriteBundle {
@@ -94,8 +105,11 @@ pub(crate) fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) 
 
 fn decay_hex_control(mut hex_query: Query<&mut HexControl, With<Hex>>) {
     for mut hex_control in hex_query.iter_mut() {
-        hex_control.red = (hex_control.red - CONTROL_DECAY).max(0f32);
-        hex_control.blue = (hex_control.blue - CONTROL_DECAY).max(0f32);
+        let new_red = lerp(hex_control.red, RED_CONTROL_TARGET, 0.25f32);
+        hex_control.red = new_red;
+
+        let new_blue = lerp(hex_control.blue, BLUE_CONTROL_TARGET, 0.25f32);
+        hex_control.blue = new_blue;
     }
 }
 
@@ -141,8 +155,6 @@ pub(crate) fn populate_map(
     let mut hexmap = q_parent.single_mut();
 
     for (entity, &hex_pos, _) in q_child.iter() {
-        dbg!(entity);
-        dbg!(hex_pos);
         assert!(hexmap.map.insert(hex_pos, entity).is_none());
     }
 }
@@ -150,6 +162,22 @@ pub(crate) fn populate_map(
 fn update_hexes(mut hex_query: Query<(&HexControl, &mut HexStatus, With<Hex>)>) {
     for (control, mut hex_status, _) in hex_query.iter_mut() {
         *hex_status = control.max_status();
+    }
+}
+
+fn update_hex_control_from_control_rays(
+    q_hex_map: Query<&HexMap>,
+    mut hex_query: Query<(&mut HexControl, With<Hex>, Without<ControlRay>)>,
+    q_control_ray: Query<(&ControlVec, With<ControlRay>, Without<Hex>)>,
+) {
+    let hex_map = q_hex_map.single();
+    for (control_vec, _, _) in q_control_ray.iter() {
+        for h in &control_vec.hexes {
+            if let Some(hex_entity) = hex_map.map.get(&h) {
+                let (mut hc, _, _) = hex_query.get_mut(*hex_entity).expect("valid hex entity");
+                *hc = *hc + control_vec.control;
+            }
+        }
     }
 }
 
@@ -291,10 +319,23 @@ impl HexMap {
         self.map.contains_key(&hex)
     }
 }
-#[derive(Component, PartialEq, PartialOrd, Ord, Eq, Debug, Clone, Copy, Hash, Add, Default)]
+#[derive(
+    Component, PartialEq, PartialOrd, Ord, Eq, Debug, Clone, Copy, Hash, Add, Sub, Default,
+)]
 pub(crate) struct HexPosition {
     pub(crate) q: i8,
     pub(crate) r: i8,
+}
+
+impl Mul<i8> for HexPosition {
+    type Output = HexPosition;
+
+    fn mul(self, rhs: i8) -> Self::Output {
+        HexPosition {
+            q: self.q * rhs,
+            r: self.r * rhs,
+        }
+    }
 }
 
 impl HexPosition {
@@ -324,6 +365,14 @@ impl HexPosition {
             r: rounded.y as i8,
         }
     }
+
+    pub(crate) fn from_vec3(vec3: Vec3) -> HexPosition {
+        HexPosition {
+            q: vec3.x as i8,
+            r: vec3.y as i8,
+        }
+    }
+
     pub(crate) fn neighbors(&self) -> [HexPosition; 6] {
         let mut neighbors = [*self; 6];
         for (n, d) in neighbors.iter_mut().zip(HEX_DIRECTIONS) {
@@ -331,6 +380,11 @@ impl HexPosition {
         }
         assert!(neighbors.iter().all(|n| n != self));
         neighbors
+    }
+
+    pub(crate) fn dist(&self, other: HexPosition) -> i8 {
+        let diff = *self - other;
+        (diff.q.abs()) + (diff.q + diff.r).abs() + (diff.r).abs() / 2
     }
 }
 fn cube_round(frac: Vec3) -> Vec3 {
@@ -350,4 +404,36 @@ fn cube_round(frac: Vec3) -> Vec3 {
         s = -q - r;
     }
     Vec3::new(q, r, s)
+}
+
+fn lerp(start: f32, end: f32, t: f32) -> f32 {
+    start * (1f32 - t) + end * t
+}
+
+fn cube_lerp(a: HexPosition, b: HexPosition, t: f32) -> Vec3 {
+    let x = lerp(f32::from(a.q), f32::from(b.q), t);
+    let y = lerp(f32::from(a.r), f32::from(b.r), t);
+    let z = lerp(f32::from(a.s()), f32::from(b.s()), t);
+    Vec3::new(x, y, z)
+}
+
+pub(crate) fn cube_linedraw(a: HexPosition, b: HexPosition) -> Vec<HexPosition> {
+    let n = a.dist(b);
+    let mut line_vec = Vec::with_capacity(n as usize);
+    for i in 0..=n {
+        line_vec.push(HexPosition::from_vec3(cube_round(cube_lerp(
+            a,
+            b,
+            1f32 / n as f32 * i as f32,
+        ))))
+    }
+
+    line_vec
+}
+
+fn lerp_point(p0: Vec2, p1: Vec2, t: f32) -> Vec2 {
+    Vec2 {
+        x: lerp(p0.x, p1.x, t),
+        y: lerp(p0.y, p1.y, t),
+    }
 }

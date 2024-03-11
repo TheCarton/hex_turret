@@ -5,7 +5,7 @@ use crate::{
     hex::{HexMap, HexPosition, HexStatus},
     turrets::{
         AntennaBundle, AntennaTextureAtlas, FireflyFactoryBundle, FireflyFactoryTextureAtlas,
-        Turret, TurretBundle, TurretTextureAtlas,
+        ReloadTimer, Turret, TurretBundle, TurretTextureAtlas,
     },
 };
 
@@ -93,12 +93,6 @@ fn spawn_structure_on_click(
     if buttons.just_pressed(MouseButton::Left) && hex_map.contains(cursor_hex.hex) {
         let hex_entity = hex_map.map.get(&cursor_hex.hex);
         dbg!(cursor_hex.hex);
-        if q_hex
-            .get(*hex_entity.unwrap())
-            .is_ok_and(|hex_status| hex_status != &HexStatus::Neutral)
-        {
-            return;
-        }
         let turret_v = cursor_hex.hex.pixel_coords();
         match selected_structure.into_inner() {
             SelectedStructure::Turret => {
@@ -126,7 +120,8 @@ fn spawn_structure_on_click(
             SelectedStructure::Antenna => {
                 commands.spawn(AntennaBundle {
                     hex_pos: cursor_hex.hex,
-                    sprite: SpriteSheetBundle {
+                    reload_timer: ReloadTimer::from(3f32),
+                    spritebundle: SpriteSheetBundle {
                         texture_atlas: antenna_texture_atlas.atlas.clone(),
                         transform: Transform::from_xyz(turret_v.x, turret_v.y, 2f32),
                         ..default()

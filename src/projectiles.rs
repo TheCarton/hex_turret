@@ -3,6 +3,8 @@ use crate::constants::{
     PROJECTILE_SIZE,
 };
 use crate::enemies::{DamagedTime, Enemy, Health, Hit};
+use crate::hex::HexPosition;
+use crate::turrets::{ControlRay, ControlVec, RayTimer};
 
 use bevy::prelude::*;
 use bevy::sprite::collide_aabb::collide;
@@ -18,6 +20,7 @@ impl Plugin for ProjectilePlugin {
                 detect_proj_enemy_collision,
                 despawn_projectiles,
                 move_projectiles,
+                update_control_rays,
             ),
         );
     }
@@ -122,6 +125,28 @@ fn move_projectiles(
         let v = Vec3::from(vel) * time.delta_seconds();
         trans.translation += v;
         dist.d += v.length();
+    }
+}
+
+fn update_control_rays(
+    mut q_control_rays: Query<(
+        Entity,
+        &mut RayTimer,
+        &mut ControlVec,
+        &HexPosition,
+        With<ControlRay>,
+    )>,
+    time: Res<Time>,
+    mut commands: Commands,
+) {
+    for (entity_id, mut ray_time, mut control_vec, hex_vel, _) in q_control_rays.iter_mut() {
+        ray_time.timer.tick(time.delta());
+        if ray_time.timer.finished() {
+            commands.entity(entity_id).despawn();
+        }
+        for pos in control_vec.hexes.iter_mut() {
+            *pos = *pos + *hex_vel;
+        }
     }
 }
 

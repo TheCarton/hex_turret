@@ -2,7 +2,11 @@ use bevy::prelude::*;
 
 use crate::animation::AnimationIndices;
 use crate::animation::AnimationTimer;
+use crate::constants::ANTENNA_RANGE;
 use crate::constants::PROJECTILE_SPEED;
+use crate::hex::cube_linedraw;
+use crate::hex::Hex;
+use crate::hex::HexControl;
 use crate::hex::HexDirection;
 use crate::projectiles::Projectile;
 use crate::projectiles::ProjectileBundle;
@@ -26,6 +30,7 @@ impl Plugin for TurretPlugin {
                 turret_status_from_hex,
                 aim_turrets,
                 fire_turrets,
+                fire_control_ray,
                 rotate_antennae,
             ),
         );
@@ -46,19 +51,86 @@ impl Default for AimVec {
 #[derive(Component, Default)]
 pub(crate) struct Antenna;
 
+#[derive(Component, Default, Debug)]
+pub(crate) struct ControlVec {
+    pub(crate) hexes: Vec<HexPosition>,
+    pub(crate) control: HexControl,
+}
+
+impl ControlVec {
+    fn line(start: HexPosition, end: HexPosition, control: HexControl) -> ControlVec {
+        ControlVec {
+            hexes: cube_linedraw(start, end),
+            control,
+        }
+    }
+}
+
+#[derive(Component, Default)]
+pub(crate) struct ControlRay;
+
+#[derive(Component, Default)]
+pub(crate) struct RayTimer {
+    pub(crate) timer: Timer,
+}
+
+#[derive(Bundle, Default)]
+pub(crate) struct ControlRayBundle {
+    control_ray: ControlRay,
+    control_vec: ControlVec,
+    velocity: HexPosition,
+    timer: RayTimer,
+}
+
 #[derive(Bundle, Default)]
 pub(crate) struct AntennaBundle {
     pub(crate) antenna: Antenna,
     pub(crate) hex_pos: HexPosition,
-    pub(crate) sprite: SpriteSheetBundle,
+    pub(crate) spritebundle: SpriteSheetBundle,
     pub(crate) face_vec: HexDirection,
     pub(crate) animation_indices: AnimationIndices,
     pub(crate) animation_timer: AnimationTimer,
+    pub(crate) reload_timer: ReloadTimer,
 }
 
 #[derive(Resource)]
 pub(crate) struct AntennaTextureAtlas {
     pub(crate) atlas: Handle<TextureAtlas>,
+}
+
+fn fire_control_ray(
+    mut q_antenna: Query<(
+        &HexPosition,
+        &HexDirection,
+        &mut ReloadTimer,
+        With<Antenna>,
+        Without<Hex>,
+    )>,
+    q_hex: Query<(&HexControl, With<Hex>, Without<Antenna>)>,
+    q_hex_map: Query<&HexMap>,
+    mut commands: Commands,
+    time: Res<Time>,
+) {
+    let hex_map = q_hex_map.single();
+    for (start, direction, mut reload, _, _) in q_antenna.iter_mut() {
+        reload.timer.tick(time.delta());
+        let hex_entity = hex_map.map.get(start).expect("start is valid hex");
+        let (hex_control, _, _) = q_hex.get(*hex_entity).expect("valid entity");
+        if reload.timer.finished() {
+            dbg!("fire control ray");
+            let end = (direction.to_hex() * ANTENNA_RANGE) - *start;
+            commands.spawn(ControlRayBundle {
+                control_vec: ControlVec {
+                    hexes: cube_linedraw(*start, end),
+                    control: *hex_control,
+                },
+                timer: RayTimer {
+                    timer: Timer::from_seconds(3f32, TimerMode::Once),
+                },
+                ..default()
+            });
+        }
+    }
 }
 
 impl FromWorld for AntennaTextureAtlas {
@@ -196,6 +268,14 @@ impl Default for ReloadTimer {
     fn default() -> Self {
         ReloadTimer {
             timer: Timer::from_seconds(TURRET_RELOAD_SECONDS, TimerMode::Repeating),
+        }
+    }
+}
+
+impl From<f32> for ReloadTimer {
+    fn from(value: f32) -> Self {
+        ReloadTimer {
+            timer: Timer::from_seconds(value, TimerMode::Repeating),
         }
     }
 }
