@@ -6,6 +6,7 @@ pub const CONTROL_DECAY: f32 = 2.5f32;
 pub const RED_CONTROL_TARGET: f32 = 0f32;
 pub const BLUE_CONTROL_TARGET: f32 = 0f32;
 pub const NEUTRAL_CONTROL_TARGET: f32 = 100f32;
+pub const MAX_CONTROL_VALUE: f32 = 500f32;
 
 pub const PLAYER_SPEED: f32 = 500.0;
 pub const PLAYER_SIZE: Vec2 = Vec2::new(28f32, 16f32);

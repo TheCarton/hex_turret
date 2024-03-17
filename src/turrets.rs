@@ -1,9 +1,12 @@
 use bevy::prelude::*;
+use bevy::sprite;
 
 use crate::animation::AnimationIndices;
 use crate::animation::AnimationTimer;
 use crate::constants::ANTENNA_RANGE;
 use crate::constants::PROJECTILE_SPEED;
+use crate::controls::PrevSelectedStructure;
+use crate::controls::SelectedStructure;
 use crate::hex::cube_linedraw;
 use crate::hex::Hex;
 use crate::hex::HexControl;
@@ -32,6 +35,7 @@ impl Plugin for TurretPlugin {
                 fire_turrets,
                 fire_control_ray,
                 rotate_antennae,
+                change_selected_structure_color,
             ),
         );
     }
@@ -87,7 +91,7 @@ pub(crate) struct AntennaBundle {
     pub(crate) antenna: Antenna,
     pub(crate) hex_pos: HexPosition,
     pub(crate) spritebundle: SpriteSheetBundle,
-    pub(crate) face_vec: HexDirection,
+    pub(crate) aim_point: AimVec,
     pub(crate) animation_indices: AnimationIndices,
     pub(crate) animation_timer: AnimationTimer,
     pub(crate) reload_timer: ReloadTimer,
@@ -101,8 +105,8 @@ pub(crate) struct AntennaTextureAtlas {
 fn fire_control_ray(
     mut q_antenna: Query<(
         &HexPosition,
-        &HexDirection,
         &mut ReloadTimer,
+        &AimVec,
         With<Antenna>,
         Without<Hex>,
     )>,
@@ -112,23 +116,26 @@ fn fire_control_ray(
     time: Res<Time>,
 ) {
     let hex_map = q_hex_map.single();
-    for (start, direction, mut reload, _, _) in q_antenna.iter_mut() {
-        reload.timer.tick(time.delta());
-        let hex_entity = hex_map.map.get(start).expect("start is valid hex");
-        let (hex_control, _, _) = q_hex.get(*hex_entity).expect("valid entity");
-        if reload.timer.finished() {
-            dbg!("fire control ray");
-            let end = (direction.to_hex() * ANTENNA_RANGE) - *start;
-            commands.spawn(ControlRayBundle {
-                control_vec: ControlVec {
-                    hexes: cube_linedraw(*start, end),
-                    control: *hex_control,
-                },
-                timer: RayTimer {
-                    timer: Timer::from_seconds(3f32, TimerMode::Once),
-                },
-                ..default()
-            });
+    for (start, mut reload, aim_vec, _, _) in q_antenna.iter_mut() {
+        if let Some(aim_point) = aim_vec.v {
+            reload.timer.tick(time.delta());
+            let hex_entity = hex_map.map.get(start).expect("start is valid hex");
+            let (hex_control, _, _) = q_hex.get(*hex_entity).expect("valid entity");
+            if reload.timer.finished() {
+                dbg!(aim_point);
+                let end = HexPosition::from_pixel(aim_point);
+                dbg!(end);
+                commands.spawn(ControlRayBundle {
+                    control_vec: ControlVec {
+                        hexes: cube_linedraw(*start, end),
+                        control: *hex_control,
+                    },
+                    timer: RayTimer {
+                        timer: Timer::from_seconds(0.5f32, TimerMode::Once),
+                    },
+                    ..default()
+                });
+            }
         }
     }
 }
@@ -287,9 +294,7 @@ fn turret_status_from_hex(
 ) {
     let hex_map = q_hex_map.single();
     for (turret, mut turret_status, _) in q_turrets.iter_mut() {
-        dbg!(&hex_map.map);
         let turret_hex = HexPosition::from_pixel(turret.translation.xy());
-        dbg!(turret_hex);
         let hex_entity = hex_map
             .map
             .get(&HexPosition::from_pixel(turret.translation.xy()))
@@ -366,18 +371,34 @@ fn fire_turrets(
     }
 }
 
-fn rotate_antennae(
-    mut q_antennae: Query<(
-        &mut Transform,
-        &HexPosition,
-        &HexDirection,
-        With<Antenna>,
-        Changed<HexDirection>,
-    )>,
+fn rotate_antennae(mut q_antennae: Query<(&mut Transform, &AimVec, With<Antenna>)>) {
+    for (mut trans, maybe_aim_vec, _) in q_antennae.iter_mut() {
+        if let Some(aim_vec) = maybe_aim_vec.v {
+            let rotate_to_aim = Quat::from_rotation_arc(Vec3::Y, aim_vec.extend(0f32));
+            trans.rotation = rotate_to_aim;
+        }
+    }
+}
+
+fn change_selected_structure_color(
+    selected_structure: Res<SelectedStructure>,
+    prev_selected_structure: Res<PrevSelectedStructure>,
+    mut q_structure: Query<&mut TextureAtlasSprite>,
 ) {
-    for (mut trans, hex_pos, hex_dir, _, _) in q_antennae.iter_mut() {
-        let aim_hex = *hex_pos + hex_dir.to_hex();
-        let rotate_to_aim = Quat::from_rotation_arc(Vec3::Y, aim_hex.pixel_coords().extend(0f32));
-        trans.rotation = rotate_to_aim;
+    if let Some(structure_entity) = selected_structure.structure.entity {
+        let mut sprite = q_structure
+            .get_mut(structure_entity)
+            .expect("valid structure entity");
+        sprite.color.set_r(1f32);
+        sprite.color.set_g(0f32);
+        sprite.color.set_b(0f32);
+    }
+    if let Some(structure_entity) = prev_selected_structure.structure.entity {
+        let mut sprite = q_structure
+            .get_mut(structure_entity)
+            .expect("valid structure entity");
+        sprite.color.set_r(1f32);
+        sprite.color.set_g(1f32);
+        sprite.color.set_b(1f32);
     }
 }

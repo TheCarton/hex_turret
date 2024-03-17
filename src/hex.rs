@@ -4,7 +4,7 @@ use itertools::Itertools;
 use std::{
     cmp::{max, min, Ordering},
     collections::HashMap,
-    ops::{Index, IndexMut, Mul, Sub},
+    ops::{Add, Index, IndexMut, Mul, Sub},
     slice::IterMut,
     sync::Arc,
 };
@@ -14,7 +14,7 @@ use rand::Rng;
 use crate::{
     colors,
     constants::{
-        BLUE_CONTROL_TARGET, CONTROL_DECAY, E, HEX_DIRECTIONS, HEX_SIZE, NE, NW,
+        BLUE_CONTROL_TARGET, CONTROL_DECAY, E, HEX_DIRECTIONS, HEX_SIZE, MAX_CONTROL_VALUE, NE, NW,
         RED_CONTROL_TARGET, SE, SW, W,
     },
     turrets::{ControlRay, ControlVec},
@@ -201,9 +201,21 @@ pub(crate) fn random_hex(hex_map: &HexMap) -> HexPosition {
 #[derive(Component, Default)]
 pub(crate) struct Hex;
 
+#[derive(Component, Default, Copy, Clone)]
+pub(crate) struct HexStructure {
+    pub(crate) entity: Option<Entity>,
+}
+
+impl HexStructure {
+    pub(crate) fn from_id(id: Entity) -> HexStructure {
+        HexStructure { entity: Some(id) }
+    }
+}
+
 #[derive(Bundle, Default)]
 pub(crate) struct HexBundle {
     pub(crate) hex: Hex,
+    pub(crate) structure: HexStructure,
     pub(crate) pos: HexPosition,
     pub(crate) status: HexStatus,
     pub(crate) sprite: SpriteBundle,
@@ -224,7 +236,7 @@ impl HexStatus {
     }
 }
 
-#[derive(Component, Debug, Copy, Clone, Add)]
+#[derive(Component, Debug, Copy, Clone)]
 pub(crate) struct HexControl {
     pub(crate) red: f32,
     pub(crate) blue: f32,
@@ -236,6 +248,18 @@ impl Default for HexControl {
         HexControl {
             red: 0f32,
             blue: 0f32,
+            neutral: 100f32,
+        }
+    }
+}
+
+impl Add for HexControl {
+    type Output = HexControl;
+
+    fn add(self, rhs: Self) -> Self::Output {
+        HexControl {
+            red: (self.red + rhs.red).min(MAX_CONTROL_VALUE),
+            blue: (self.blue + rhs.blue).min(MAX_CONTROL_VALUE),
             neutral: 100f32,
         }
     }
