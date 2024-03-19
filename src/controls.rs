@@ -4,6 +4,7 @@ use bevy::{
 
 use crate::{
     camera::MainCamera,
+    constants::ANTENNA_FIRE_RATE,
     hex::{Hex, HexMap, HexPosition, HexStatus, HexStructure},
     turrets::{
         AimVec, Antenna, AntennaBundle, AntennaTextureAtlas, FireflyFactoryBundle,
@@ -25,7 +26,7 @@ impl Plugin for ControlPlugin {
                 (
                     cursor_system,
                     spawn_structure_on_click,
-                    update_antenna_aim_point,
+                    update_antenna_target,
                     select_spawn_structure,
                     select_structure,
                 ),
@@ -86,8 +87,9 @@ fn cursor_system(
     }
 }
 
-fn update_antenna_aim_point(
-    mut q_antenna: Query<(&Transform, &mut AimVec, With<Antenna>)>,
+fn update_antenna_target(
+    q_hex_map: Query<&HexMap>,
+    mut q_antenna: Query<&mut AimVec, With<Antenna>>,
     cursor_coords: Res<CursorWorldCoords>,
     selected_structure: Res<SelectedStructure>,
     buttons: Res<Input<MouseButton>>,
@@ -98,9 +100,17 @@ fn update_antenna_aim_point(
     ) {
         // TODO: Add a target component to the antenna bundle and use that to calculate the aim vector and hex aim point.
         (Some(structure_entity), Some(MouseButton::Right)) => {
-            if let Ok((transform, mut antenna_aim_vec, _)) = q_antenna.get_mut(structure_entity) {
-                let v = (cursor_coords.pos - transform.translation.truncate()).try_normalize();
-                *antenna_aim_vec = AimVec { v };
+            let hex_map = q_hex_map.single();
+            if let Ok(mut antenna_aim_vec) = q_antenna.get_mut(structure_entity) {
+                if hex_map
+                    .map
+                    .get(&HexPosition::from_pixel(cursor_coords.pos))
+                    .is_some()
+                {
+                    *antenna_aim_vec = AimVec {
+                        v: Some(cursor_coords.pos),
+                    };
+                }
             }
         }
         _ => {}
@@ -193,7 +203,7 @@ fn spawn_structure_on_click(
             SpawnSelectedStructure::Antenna => commands
                 .spawn(AntennaBundle {
                     hex_pos: cursor_hex.hex,
-                    reload_timer: ReloadTimer::from(3f32),
+                    reload_timer: ReloadTimer::from(ANTENNA_FIRE_RATE),
                     spritebundle: SpriteSheetBundle {
                         texture_atlas: antenna_texture_atlas.atlas.clone(),
                         transform: Transform::from_xyz(turret_v.x, turret_v.y, 2f32),

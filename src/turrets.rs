@@ -91,7 +91,7 @@ pub(crate) struct AntennaBundle {
     pub(crate) antenna: Antenna,
     pub(crate) hex_pos: HexPosition,
     pub(crate) spritebundle: SpriteSheetBundle,
-    pub(crate) aim_point: AimVec,
+    pub(crate) target_point: AimVec,
     pub(crate) animation_indices: AnimationIndices,
     pub(crate) animation_timer: AnimationTimer,
     pub(crate) reload_timer: ReloadTimer,
@@ -122,9 +122,7 @@ fn fire_control_ray(
             let hex_entity = hex_map.map.get(start).expect("start is valid hex");
             let (hex_control, _, _) = q_hex.get(*hex_entity).expect("valid entity");
             if reload.timer.finished() {
-                dbg!(aim_point);
                 let end = HexPosition::from_pixel(aim_point);
-                dbg!(end);
                 commands.spawn(ControlRayBundle {
                     control_vec: ControlVec {
                         hexes: cube_linedraw(*start, end),
@@ -374,8 +372,10 @@ fn fire_turrets(
 fn rotate_antennae(mut q_antennae: Query<(&mut Transform, &AimVec, With<Antenna>)>) {
     for (mut trans, maybe_aim_vec, _) in q_antennae.iter_mut() {
         if let Some(aim_vec) = maybe_aim_vec.v {
-            let rotate_to_aim = Quat::from_rotation_arc(Vec3::Y, aim_vec.extend(0f32));
-            trans.rotation = rotate_to_aim;
+            if let Some(aim_point) = (aim_vec - trans.translation.truncate()).try_normalize() {
+                let rotate_to_aim = Quat::from_rotation_arc(Vec3::Y, aim_point.extend(0f32));
+                trans.rotation = rotate_to_aim;
+            }
         }
     }
 }

@@ -18,6 +18,7 @@ pub const PROJECTILE_DAMAGE: f32 = 20f32;
 
 pub const TURRET_RANGE: f32 = HEX_SIZE * 6f32;
 pub const TURRET_RELOAD_SECONDS: f32 = 0.75;
+pub const ANTENNA_FIRE_RATE: f32 = 0.15;
 
 pub const ANTENNA_RANGE: i8 = 4;
 
