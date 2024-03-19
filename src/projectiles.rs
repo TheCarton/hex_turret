@@ -6,8 +6,8 @@ use crate::enemies::{DamagedTime, Enemy, Health, Hit};
 use crate::hex::HexPosition;
 use crate::turrets::{ControlRay, ControlVec, RayTimer};
 
+use bevy::math::bounding::{Aabb2d, IntersectsVolume};
 use bevy::prelude::*;
-use bevy::sprite::collide_aabb::collide;
 use derive_more::Add;
 
 pub(crate) struct ProjectilePlugin;
@@ -85,26 +85,17 @@ impl From<f32> for Distance {
 }
 
 fn detect_proj_enemy_collision(
-    mut q_enemies: Query<(
-        &Transform,
-        &mut DamagedTime,
-        &mut Health,
-        With<Enemy>,
-        Without<Projectile>,
-    )>,
-    mut q_projectiles: Query<(&Transform, &mut Hit, With<Projectile>, Without<Enemy>)>,
+    mut q_enemies: Query<
+        (&Transform, &mut DamagedTime, &mut Health),
+        (With<Enemy>, Without<Projectile>),
+    >,
+    mut q_projectiles: Query<(&Transform, &mut Hit), (With<Projectile>, Without<Enemy>)>,
 ) {
     for (proj, mut proj_hit, _, _) in &mut q_projectiles {
         for (enemy, mut damage_dur, mut enemy_health, _, _) in &mut q_enemies {
-            let proj_hit_enemy = collide(
-                enemy.translation,
-                ENEMY_SIZE,
-                proj.translation,
-                PROJECTILE_SIZE,
-            )
-            .is_some();
-
-            if proj_hit_enemy {
+            let collision = Aabb2d::new(enemy.translation.truncate(), ENEMY_SIZE / 2f32)
+                .intersects(&Aabb2d::new(proj.translation, PROJECTILE_SIZE / 2f32));
+            if collision {
                 proj_hit.has_hit = true;
                 enemy_health.hp -= PROJECTILE_DAMAGE;
                 damage_dur.time = Some(Timer::from_seconds(
@@ -118,10 +109,10 @@ fn detect_proj_enemy_collision(
 }
 
 fn move_projectiles(
-    mut q_projectiles: Query<(&mut Transform, &mut Distance, &Velocity, With<Projectile>)>,
+    mut q_projectiles: Query<(&mut Transform, &mut Distance, &Velocity), With<Projectile>>,
     time: Res<Time>,
 ) {
-    for (mut trans, mut dist, vel, _) in &mut q_projectiles {
+    for (mut trans, mut dist, vel) in &mut q_projectiles {
         let v = Vec3::from(vel) * time.delta_seconds();
         trans.translation += v;
         dist.d += v.length();
@@ -129,17 +120,14 @@ fn move_projectiles(
 }
 
 fn update_control_rays(
-    mut q_control_rays: Query<(
-        Entity,
-        &mut RayTimer,
-        &mut ControlVec,
-        &HexPosition,
+    mut q_control_rays: Query<
+        (Entity, &mut RayTimer, &mut ControlVec, &HexPosition),
         With<ControlRay>,
-    )>,
+    >,
     time: Res<Time>,
     mut commands: Commands,
 ) {
-    for (entity_id, mut ray_time, mut control_vec, hex_vel, _) in q_control_rays.iter_mut() {
+    for (entity_id, mut ray_time, mut control_vec, hex_vel) in q_control_rays.iter_mut() {
         ray_time.timer.tick(time.delta());
         if ray_time.timer.finished() {
             commands.entity(entity_id).despawn();
@@ -152,7 +140,7 @@ fn update_control_rays(
 
 fn despawn_projectiles(
     mut commands: Commands,
-    q_projectiles: Query<(Entity, &Distance, &Hit, With<Projectile>)>,
+    q_projectiles: Query<(Entity, &Distance, &Hit), With<Projectile>>,
 ) {
     for (entity, dist, hit, _) in &q_projectiles {
         if dist.d > PROJECTILE_RANGE || hit.has_hit {

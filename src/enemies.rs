@@ -1,4 +1,9 @@
-use bevy::{prelude::*, sprite::collide_aabb::collide};
+use bevy::math::bounding::Aabb2d;
+use bevy::math::bounding::IntersectsVolume;
+use bevy::prelude::*;
+
+use bevy_asset_loader::asset_collection::AssetCollection;
+use bevy_asset_loader::prelude::*;
 
 use crate::animation::AnimationIndices;
 use crate::animation::AnimationTimer;
@@ -14,7 +19,6 @@ pub(crate) struct EnemiesPlugin;
 
 impl Plugin for EnemiesPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<FireflyTextureAtlas>();
         app.add_systems(Startup, setup_factory_spawning);
         app.add_systems(
             Update,
@@ -46,7 +50,7 @@ pub(crate) struct FireflyBundle {
     pub(crate) damaged_time: DamagedTime,
     pub(crate) enemy: Enemy,
     pub(crate) health: Health,
-    pub(crate) sprite: SpriteSheetBundle,
+    pub(crate) sprite_bundle: SpriteSheetBundle,
     pub(crate) animation_indices: AnimationIndices,
     pub(crate) animation_timer: AnimationTimer,
 }
@@ -58,9 +62,20 @@ pub(crate) enum FireflyAnimationState {
     Damaged,
 }
 
-#[derive(Resource)]
-pub(crate) struct FireflyTextureAtlas {
-    pub(crate) atlas: Handle<TextureAtlas>,
+#[derive(AssetCollection, Resource)]
+pub(crate) struct FireflyAssets {
+    #[asset(texture_atlas_layout(
+        tile_size_x = 64.,
+        tile_size_y = 64.,
+        columns = 8,
+        rows = 1,
+        padding_x = 12.,
+        padding_y = 12.,
+        offset_x = 6.,
+        offset_y = 6.
+    ))]
+    layout: Handle<TextureAtlasLayout>,
+    sprite: Handle<Image>,
 }
 
 #[derive(Component, Default)]
@@ -81,20 +96,6 @@ pub(crate) struct DamagedTime {
 impl Default for DamagedTime {
     fn default() -> Self {
         DamagedTime { time: None }
-    }
-}
-
-impl FromWorld for FireflyTextureAtlas {
-    fn from_world(world: &mut World) -> Self {
-        let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
-        let texture_handle = asset_server.load("firefly_spritesheet.png");
-        let texture_atlas =
-            TextureAtlas::from_grid(texture_handle, Vec2::new(48f32, 48f32), 8, 3, None, None);
-        let mut texture_atlases = world.get_resource_mut::<Assets<TextureAtlas>>().unwrap();
-        let texture_atlas_handle = texture_atlases.add(texture_atlas);
-        FireflyTextureAtlas {
-            atlas: texture_atlas_handle,
-        }
     }
 }
 
@@ -139,9 +140,9 @@ fn move_enemy(
 
 fn despawn_dead_enemies(
     mut commands: Commands,
-    q_enemies: Query<(Entity, &Health, &Hit, With<Enemy>)>,
+    q_enemies: Query<(Entity, &Health, &Hit), With<Enemy>>,
 ) {
-    for (enemy_entity, health, hit, _) in &q_enemies {
+    for (enemy_entity, health, hit) in &q_enemies {
         if health.hp <= 0f32 || hit.has_hit {
             commands.entity(enemy_entity).despawn();
         }
@@ -149,36 +150,33 @@ fn despawn_dead_enemies(
 }
 
 fn detect_enemy_player_collision(
-    mut q_enemies: Query<(&Transform, &mut Hit, With<Enemy>, Without<Player>)>,
-    q_player: Query<(&Transform, With<Player>, Without<Enemy>)>,
+    mut q_enemies: Query<(&Transform, &mut Hit), (With<Enemy>, Without<Player>)>,
+    q_player: Query<&Transform, (With<Player>, Without<Enemy>)>,
 ) {
-    let (player, _, _) = q_player.single();
-    for (enemy, mut enemy_collision, _, _) in &mut q_enemies {
-        enemy_collision.has_hit = collide(
-            enemy.translation,
-            ENEMY_SIZE,
-            player.translation,
-            PLAYER_SIZE,
-        )
-        .is_some();
+    let player = q_player.single();
+    for (enemy, mut enemy_collision) in &mut q_enemies {
+        let collision = Aabb2d::new(enemy.translation.truncate(), ENEMY_SIZE / 2f32).intersects(
+            &Aabb2d::new(player.translation.truncate(), PLAYER_SIZE / 2f32),
+        );
+        enemy_collision.has_hit = collision;
     }
 }
 
 fn spawn_fireflies(
     mut commands: Commands,
-    firefly_sprite_sheet: Res<FireflyTextureAtlas>,
+    firefly_sprite_sheet: Res<FireflyAssets>,
     time: Res<Time>,
-    mut q_factories: Query<(&Transform, &mut BuildTimer, With<FireflyFactory>)>,
+    mut q_factories: Query<(&Transform, &mut BuildTimer), With<FireflyFactory>>,
 ) {
-    for (factory, mut build_timer, _) in q_factories.iter_mut() {
+    for (factory, mut build_timer) in q_factories.iter_mut() {
         build_timer.timer.tick(time.delta());
         if build_timer.timer.finished() {
             let p = Vec3::new(factory.translation.x, factory.translation.y, 2f32);
             let mut anim_indices = AnimationIndices::firefly_indices();
             commands.spawn(FireflyBundle {
-                sprite: SpriteSheetBundle {
-                    sprite: TextureAtlasSprite::new(anim_indices.next_index()),
-                    texture_atlas: firefly_sprite_sheet.atlas.clone(),
+                sprite_bundle: SpriteSheetBundle {
+                    sprite: TextureAtlas::new(anim_indices.next_index()),
+                    texture: firefly_sprite_sheet.atlas.clone(),
                     transform: Transform::from_translation(p),
                     ..default()
                 },

@@ -1,14 +1,12 @@
-use bevy::{
-    core_pipeline::core_2d::graph::node::TONEMAPPING, prelude::*, utils::dbg, window::PrimaryWindow,
-};
+use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::{
     camera::MainCamera,
     constants::ANTENNA_FIRE_RATE,
     hex::{Hex, HexMap, HexPosition, HexStatus, HexStructure},
     turrets::{
-        AimVec, Antenna, AntennaBundle, AntennaTextureAtlas, FireflyFactoryBundle,
-        FireflyFactoryTextureAtlas, ReloadTimer, Turret, TurretBundle, TurretTextureAtlas,
+        AimVec, Antenna, AntennaBundle, AntennaTextureAtlasLayout, FireflyFactoryBundle,
+        FireflyFactoryTextureAtlas, ReloadTimer, TurretBundle, TurretTextureAtlas,
     },
 };
 
@@ -92,7 +90,7 @@ fn update_antenna_target(
     mut q_antenna: Query<&mut AimVec, With<Antenna>>,
     cursor_coords: Res<CursorWorldCoords>,
     selected_structure: Res<SelectedStructure>,
-    buttons: Res<Input<MouseButton>>,
+    buttons: Res<ButtonInput<MouseButton>>,
 ) {
     match (
         selected_structure.structure.entity,
@@ -123,7 +121,7 @@ fn select_structure(
     cursor_hex: Res<CursorHexPosition>,
     q_hex_map: Query<&HexMap>,
     q_hex: Query<&HexStructure>,
-    buttons: Res<Input<MouseButton>>,
+    buttons: Res<ButtonInput<MouseButton>>,
 ) {
     if buttons.just_pressed(MouseButton::Left) {
         let hex_map = q_hex_map.single();
@@ -147,31 +145,31 @@ fn select_structure(
 
 fn select_spawn_structure(
     mut spawn_structure: ResMut<SpawnSelectedStructure>,
-    buttons: Res<Input<KeyCode>>,
+    buttons: Res<ButtonInput<KeyCode>>,
 ) {
     match buttons.get_pressed().last() {
-        Some(KeyCode::Key1) => *spawn_structure = SpawnSelectedStructure::Turret,
-        Some(KeyCode::Key2) => *spawn_structure = SpawnSelectedStructure::Factory,
-        Some(KeyCode::Key3) => *spawn_structure = SpawnSelectedStructure::Antenna,
+        Some(KeyCode::Digit1) => *spawn_structure = SpawnSelectedStructure::Turret,
+        Some(KeyCode::Digit2) => *spawn_structure = SpawnSelectedStructure::Factory,
+        Some(KeyCode::Digit3) => *spawn_structure = SpawnSelectedStructure::Antenna,
         _ => {}
     }
 }
 
 fn spawn_structure_on_click(
     mut commands: Commands,
-    mut q_hex: Query<(&HexStatus, &mut HexStructure, With<Hex>)>,
+    mut q_hex: Query<(&HexStatus, &mut HexStructure), With<Hex>>,
     q_hex_map: Query<&HexMap>,
     turret_texture_atlas: Res<TurretTextureAtlas>,
-    antenna_texture_atlas: Res<AntennaTextureAtlas>,
+    antenna_texture_atlas: Res<AntennaTextureAtlasLayout>,
     factory_texture_atlas: Res<FireflyFactoryTextureAtlas>,
     cursor_hex: Res<CursorHexPosition>,
     spawn_structure: Res<SpawnSelectedStructure>,
-    buttons: Res<Input<MouseButton>>,
+    buttons: Res<ButtonInput<MouseButton>>,
 ) {
     let hex_map = q_hex_map.single();
     if buttons.just_pressed(MouseButton::Left) && hex_map.contains(cursor_hex.hex) {
         let hex_entity = hex_map.map.get(&cursor_hex.hex).expect("valid cursor hex");
-        let (_hex_status, mut hex_structure, _) =
+        let (_hex_status, mut hex_structure) =
             q_hex.get_mut(*hex_entity).expect("valid hex entity");
         if hex_structure.entity.is_some() {
             return;
@@ -182,7 +180,7 @@ fn spawn_structure_on_click(
                 .spawn(TurretBundle {
                     hex_pos: cursor_hex.hex,
                     sprite: SpriteSheetBundle {
-                        texture_atlas: turret_texture_atlas.atlas.clone(),
+                        texture: turret_texture_atlas.atlas.clone(),
                         transform: Transform::from_xyz(turret_v.x, turret_v.y, 2f32),
                         ..default()
                     },
@@ -193,7 +191,7 @@ fn spawn_structure_on_click(
                 .spawn(FireflyFactoryBundle {
                     hex_pos: cursor_hex.hex,
                     sprite: SpriteSheetBundle {
-                        texture_atlas: factory_texture_atlas.atlas.clone(),
+                        texture: factory_texture_atlas.atlas.clone(),
                         transform: Transform::from_xyz(turret_v.x, turret_v.y, 2f32),
                         ..default()
                     },
@@ -205,7 +203,7 @@ fn spawn_structure_on_click(
                     hex_pos: cursor_hex.hex,
                     reload_timer: ReloadTimer::from(ANTENNA_FIRE_RATE),
                     spritebundle: SpriteSheetBundle {
-                        texture_atlas: antenna_texture_atlas.atlas.clone(),
+                        texture: antenna_texture_atlas.atlas.clone(),
                         transform: Transform::from_xyz(turret_v.x, turret_v.y, 2f32),
                         ..default()
                     },

@@ -1,12 +1,10 @@
-use bevy::{ecs::system::SystemState, prelude::*};
+use bevy::prelude::*;
 use derive_more::{Add, Sub};
 use itertools::Itertools;
 use std::{
-    cmp::{max, min, Ordering},
+    cmp::Ordering,
     collections::HashMap,
-    ops::{Add, Index, IndexMut, Mul, Sub},
-    slice::IterMut,
-    sync::Arc,
+    ops::{Add, Index, IndexMut, Mul},
 };
 
 use rand::Rng;
@@ -14,7 +12,7 @@ use rand::Rng;
 use crate::{
     colors,
     constants::{
-        BLUE_CONTROL_TARGET, CONTROL_DECAY, E, HEX_DIRECTIONS, HEX_SIZE, MAX_CONTROL_VALUE, NE, NW,
+        BLUE_CONTROL_TARGET, E, HEX_DIRECTIONS, HEX_SIZE, MAX_CONTROL_VALUE, NE, NW,
         RED_CONTROL_TARGET, SE, SW, W,
     },
     turrets::{ControlRay, ControlVec},
@@ -119,7 +117,7 @@ fn decay_hex_control(mut hex_query: Query<&mut HexControl, With<Hex>>) {
 // I have to reaquaint them with the entire illusion of modernity just to disillusion them.
 
 fn diffuse_hex_control(
-    mut q_hexes: Query<(&HexPosition, &mut HexControl, With<Hex>)>,
+    mut q_hexes: Query<(&HexPosition, &mut HexControl), With<Hex>>,
     q_hex_map: Query<&HexMap>,
 ) {
     let hex_map = q_hex_map.single();
@@ -132,7 +130,7 @@ fn diffuse_hex_control(
         let num_neighbors = neighbor_entities.len() as f32;
         for adj_entity in neighbor_entities {
             let hex_entities: [Entity; 2] = [*entity, *adj_entity];
-            let [(_, mut hex_control, _), (_, mut adj_control, _)] = q_hexes.many_mut(hex_entities);
+            let [mut hex_control, mut adj_control] = q_hexes.many_mut(hex_entities);
             let prev_control = hex_control.clone();
             for status_color in [HexStatus::Red, HexStatus::Blue] {
                 if adj_control[status_color] < hex_control[status_color] {
@@ -150,39 +148,39 @@ fn diffuse_hex_control(
 
 pub(crate) fn populate_map(
     mut q_parent: Query<&mut HexMap>,
-    q_child: Query<(Entity, &HexPosition, With<Hex>)>,
+    q_child: Query<(Entity, &HexPosition), With<Hex>>,
 ) {
     let mut hexmap = q_parent.single_mut();
 
-    for (entity, &hex_pos, _) in q_child.iter() {
+    for (entity, &hex_pos) in q_child.iter() {
         assert!(hexmap.map.insert(hex_pos, entity).is_none());
     }
 }
 
-fn update_hexes(mut hex_query: Query<(&HexControl, &mut HexStatus, With<Hex>)>) {
-    for (control, mut hex_status, _) in hex_query.iter_mut() {
+fn update_hexes(mut hex_query: Query<(&HexControl, &mut HexStatus), With<Hex>>) {
+    for (control, mut hex_status) in hex_query.iter_mut() {
         *hex_status = control.max_status();
     }
 }
 
 fn update_hex_control_from_control_rays(
     q_hex_map: Query<&HexMap>,
-    mut hex_query: Query<(&mut HexControl, With<Hex>, Without<ControlRay>)>,
-    q_control_ray: Query<(&ControlVec, With<ControlRay>, Without<Hex>)>,
+    mut hex_query: Query<&mut HexControl, (With<Hex>, Without<ControlRay>)>,
+    q_control_ray: Query<&ControlVec, (With<ControlRay>, Without<Hex>)>,
 ) {
     let hex_map = q_hex_map.single();
-    for (control_vec, _, _) in q_control_ray.iter() {
+    for control_vec in q_control_ray.iter() {
         for h in &control_vec.hexes {
             if let Some(hex_entity) = hex_map.map.get(&h) {
-                let (mut hc, _, _) = hex_query.get_mut(*hex_entity).expect("valid hex entity");
+                let mut hc = hex_query.get_mut(*hex_entity).expect("valid hex entity");
                 *hc = *hc + control_vec.control;
             }
         }
     }
 }
 
-fn change_hex_color(mut hex_query: Query<(&HexControl, &mut Sprite, With<Hex>)>) {
-    for (control, mut sprite, _) in hex_query.iter_mut() {
+fn change_hex_color(mut hex_query: Query<(&HexControl, &mut Sprite), With<Hex>>) {
+    for (control, mut sprite) in hex_query.iter_mut() {
         let base = control.red + control.blue + control.neutral;
         sprite.color.set_r(control.red / base);
         sprite.color.set_b(control.blue / base);

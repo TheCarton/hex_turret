@@ -1,16 +1,13 @@
 use bevy::prelude::*;
-use bevy::sprite;
 
 use crate::animation::AnimationIndices;
 use crate::animation::AnimationTimer;
-use crate::constants::ANTENNA_RANGE;
 use crate::constants::PROJECTILE_SPEED;
 use crate::controls::PrevSelectedStructure;
 use crate::controls::SelectedStructure;
 use crate::hex::cube_linedraw;
 use crate::hex::Hex;
 use crate::hex::HexControl;
-use crate::hex::HexDirection;
 use crate::projectiles::Projectile;
 use crate::projectiles::ProjectileBundle;
 use crate::projectiles::Velocity;
@@ -26,7 +23,7 @@ impl Plugin for TurretPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TurretTextureAtlas>();
         app.init_resource::<FireflyFactoryTextureAtlas>();
-        app.init_resource::<AntennaTextureAtlas>();
+        app.init_resource::<AntennaTextureAtlasLayout>();
         app.add_systems(
             Update,
             (
@@ -98,29 +95,23 @@ pub(crate) struct AntennaBundle {
 }
 
 #[derive(Resource)]
-pub(crate) struct AntennaTextureAtlas {
-    pub(crate) atlas: Handle<TextureAtlas>,
+pub(crate) struct AntennaTextureAtlasLayout {
+    pub(crate) atlas: Handle<TextureAtlasLayout>,
 }
 
 fn fire_control_ray(
-    mut q_antenna: Query<(
-        &HexPosition,
-        &mut ReloadTimer,
-        &AimVec,
-        With<Antenna>,
-        Without<Hex>,
-    )>,
-    q_hex: Query<(&HexControl, With<Hex>, Without<Antenna>)>,
+    mut q_antenna: Query<(&HexPosition, &mut ReloadTimer, &AimVec), (With<Antenna>, Without<Hex>)>,
+    q_hex: Query<&HexControl, (With<Hex>, Without<Antenna>)>,
     q_hex_map: Query<&HexMap>,
     mut commands: Commands,
     time: Res<Time>,
 ) {
     let hex_map = q_hex_map.single();
-    for (start, mut reload, aim_vec, _, _) in q_antenna.iter_mut() {
+    for (start, mut reload, aim_vec) in q_antenna.iter_mut() {
         if let Some(aim_point) = aim_vec.v {
             reload.timer.tick(time.delta());
             let hex_entity = hex_map.map.get(start).expect("start is valid hex");
-            let (hex_control, _, _) = q_hex.get(*hex_entity).expect("valid entity");
+            let hex_control = q_hex.get(*hex_entity).expect("valid entity");
             if reload.timer.finished() {
                 let end = HexPosition::from_pixel(aim_point);
                 commands.spawn(ControlRayBundle {
@@ -138,15 +129,15 @@ fn fire_control_ray(
     }
 }
 
-impl FromWorld for AntennaTextureAtlas {
+impl FromWorld for AntennaTextureAtlasLayout {
     fn from_world(world: &mut World) -> Self {
         let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
         let texture_handle = asset_server.load("antenna.png");
         let texture_atlas =
-            TextureAtlas::from_grid(texture_handle, Vec2::new(64f32, 64f32), 1, 1, None, None);
+            TextureAtlasLayout::from_grid(Vec2::new(64f32, 64f32), 1, 1, None, None);
         let mut texture_atlases = world.get_resource_mut::<Assets<TextureAtlas>>().unwrap();
         let texture_atlas_handle = texture_atlases.add(texture_atlas);
-        AntennaTextureAtlas {
+        AntennaTextureAtlasLayout {
             atlas: texture_atlas_handle,
         }
     }
@@ -157,7 +148,7 @@ pub(crate) struct FireflyFactory;
 
 #[derive(Resource)]
 pub(crate) struct FireflyFactoryTextureAtlas {
-    pub(crate) atlas: Handle<TextureAtlas>,
+    pub(crate) atlas: Handle<TextureAtlasLayout>,
 }
 
 #[derive(Component, Default)]
@@ -247,7 +238,7 @@ pub(crate) struct TurretBundle {
 
 #[derive(Resource)]
 pub(crate) struct TurretTextureAtlas {
-    pub(crate) atlas: Handle<TextureAtlas>,
+    pub(crate) atlas: Handle<TextureAtlasLayout>,
 }
 
 impl FromWorld for TurretTextureAtlas {
@@ -286,12 +277,12 @@ impl From<f32> for ReloadTimer {
 }
 
 fn turret_status_from_hex(
-    mut q_turrets: Query<(&Transform, &mut TurretStatus, With<Turret>)>,
+    mut q_turrets: Query<(&Transform, &mut TurretStatus), With<Turret>>,
     q_hex: Query<&HexStatus>,
     q_hex_map: Query<&HexMap>,
 ) {
     let hex_map = q_hex_map.single();
-    for (turret, mut turret_status, _) in q_turrets.iter_mut() {
+    for (turret, mut turret_status) in q_turrets.iter_mut() {
         let turret_hex = HexPosition::from_pixel(turret.translation.xy());
         let hex_entity = hex_map
             .map
@@ -307,19 +298,13 @@ fn turret_status_from_hex(
 }
 
 fn aim_turrets(
-    mut q_turrets: Query<(
-        &Transform,
-        &mut AimVec,
-        &TurretStatus,
-        With<Turret>,
-        Without<Enemy>,
-    )>,
-    q_enemies: Query<(&Transform, With<Enemy>)>,
+    mut q_turrets: Query<(&Transform, &mut AimVec, &TurretStatus), (With<Turret>, Without<Enemy>)>,
+    q_enemies: Query<&Transform, With<Enemy>>,
 ) {
-    for (turret, mut aim, status, _, _) in q_turrets.iter_mut() {
+    for (turret, mut aim, status) in q_turrets.iter_mut() {
         let closest_enemy = q_enemies
             .iter()
-            .map(|(enemy, _)| {
+            .map(|enemy| {
                 (
                     enemy.translation,
                     enemy.translation.distance(turret.translation),
@@ -340,7 +325,7 @@ fn aim_turrets(
 
 fn fire_turrets(
     mut commands: Commands,
-    mut q_turrets: Query<(&mut Transform, &mut ReloadTimer, &AimVec, With<Turret>)>,
+    mut q_turrets: Query<(&mut Transform, &mut ReloadTimer, &AimVec), With<Turret>>,
     asset_server: Res<AssetServer>,
     time: Res<Time>,
 ) {
@@ -369,7 +354,7 @@ fn fire_turrets(
     }
 }
 
-fn rotate_antennae(mut q_antennae: Query<(&mut Transform, &AimVec, With<Antenna>)>) {
+fn rotate_antennae(mut q_antennae: Query<(&mut Transform, &AimVec), With<Antenna>>) {
     for (mut trans, maybe_aim_vec, _) in q_antennae.iter_mut() {
         if let Some(aim_vec) = maybe_aim_vec.v {
             if let Some(aim_point) = (aim_vec - trans.translation.truncate()).try_normalize() {
@@ -383,7 +368,7 @@ fn rotate_antennae(mut q_antennae: Query<(&mut Transform, &AimVec, With<Antenna>
 fn change_selected_structure_color(
     selected_structure: Res<SelectedStructure>,
     prev_selected_structure: Res<PrevSelectedStructure>,
-    mut q_structure: Query<&mut TextureAtlasSprite>,
+    mut q_structure: Query<&mut TextureAtlas>,
 ) {
     if let Some(structure_entity) = selected_structure.structure.entity {
         let mut sprite = q_structure

@@ -15,7 +15,7 @@ impl Plugin for PlayerPlugin {
             Startup,
             (spawn_player, spawn_player_hex_control, apply_deferred).chain(),
         );
-        app.add_systems(Update, (move_player));
+        app.add_systems(Update, move_player);
         app.add_systems(FixedUpdate, player_control_hex);
     }
 }
@@ -50,38 +50,35 @@ fn spawn_player(mut commands: Commands, asset_server: Res<AssetServer>) {
 }
 
 fn player_control_hex(
-    q_player_hex_control: Query<(
-        &HexControl,
-        &HexPosition,
-        Changed<HexPosition>,
-        With<Player>,
-        Without<Hex>,
-    )>,
-    mut q_player_hex: Query<(&mut HexControl, With<Hex>, Without<Player>)>,
+    q_player_hex_control: Query<
+        (&HexControl, &HexPosition),
+        (Changed<HexPosition>, With<Player>, Without<Hex>),
+    >,
+    mut q_player_hex: Query<&mut HexControl, (With<Hex>, Without<Player>)>,
     q_hex_map: Query<&HexMap>,
 ) {
-    let (player_control, player_pos, _, _, _) = q_player_hex_control.single();
+    let (player_control, player_pos) = q_player_hex_control.single();
     let hex_map = q_hex_map.single();
     let hex_id = hex_map.map.get(player_pos);
     if let Some(h) = hex_id {
-        if let Ok((mut hex_control, _, _)) = q_player_hex.get_mut(*h) {
+        if let Ok(mut hex_control) = q_player_hex.get_mut(*h) {
             *hex_control = hex_control.add(*player_control);
         }
     }
 }
 
 fn move_player(
-    keyboard_input: Res<Input<KeyCode>>,
+    keyboard_input: Res<ButtonInput<KeyCode>>,
     mut player_transform_query: Query<&mut Transform, With<Player>>,
     mut player_hex_query: Query<&mut HexPosition, With<Player>>,
     time: Res<Time>,
 ) {
     let mut player_transform = player_transform_query.single_mut();
     let direction = match keyboard_input.get_pressed().last() {
-        Some(KeyCode::Left) | Some(KeyCode::A) => Vec3::new(-1.0, 0.0, 0.0),
-        Some(KeyCode::Right) | Some(KeyCode::D) => Vec3::new(1.0, 0.0, 0.0),
-        Some(KeyCode::Up) | Some(KeyCode::W) => Vec3::new(0.0, 1.0, 0.0),
-        Some(KeyCode::Down) | Some(KeyCode::S) => Vec3::new(0.0, -1.0, 0.0),
+        Some(KeyCode::ArrowLeft) | Some(KeyCode::KeyA) => Vec3::new(-1.0, 0.0, 0.0),
+        Some(KeyCode::ArrowRight) | Some(KeyCode::KeyD) => Vec3::new(1.0, 0.0, 0.0),
+        Some(KeyCode::ArrowUp) | Some(KeyCode::KeyW) => Vec3::new(0.0, 1.0, 0.0),
+        Some(KeyCode::ArrowDown) | Some(KeyCode::KeyS) => Vec3::new(0.0, -1.0, 0.0),
         _ => Vec3::ZERO,
     };
 

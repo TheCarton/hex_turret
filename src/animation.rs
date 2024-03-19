@@ -71,7 +71,7 @@ fn animate_sprite(
     mut query: Query<(
         &mut AnimationIndices,
         &mut AnimationTimer,
-        &mut TextureAtlasSprite,
+        &mut TextureAtlas,
     )>,
 ) {
     for (mut indices, mut timer, mut sprite) in query.iter_mut() {
@@ -83,14 +83,16 @@ fn animate_sprite(
 }
 
 fn update_firefly_animation(
-    mut q_fireflies: Query<(
-        &CurrentFireflyAnimationState,
-        &mut PrevFireflyAnimationState,
-        &mut AnimationIndices,
+    mut q_fireflies: Query<
+        (
+            &CurrentFireflyAnimationState,
+            &mut PrevFireflyAnimationState,
+            &mut AnimationIndices,
+        ),
         Changed<CurrentFireflyAnimationState>,
-    )>,
+    >,
 ) {
-    for (curr_anim, mut prev_anim, mut indices, _) in q_fireflies.iter_mut() {
+    for (curr_anim, mut prev_anim, mut indices) in q_fireflies.iter_mut() {
         if curr_anim.state != prev_anim.state {
             *indices = match curr_anim.state {
                 FireflyAnimationState::Normal => AnimationIndices::new(0, 3),
@@ -102,18 +104,17 @@ fn update_firefly_animation(
 }
 
 fn update_firefly_animation_state(
-    mut q_fireflies: Query<(
-        &mut CurrentFireflyAnimationState,
-        &mut PrevFireflyAnimationState,
-        &mut DamagedTime,
+    mut q_fireflies: Query<
+        (
+            &mut CurrentFireflyAnimationState,
+            &mut PrevFireflyAnimationState,
+            &mut DamagedTime,
+        ),
         With<Firefly>,
-    )>,
+    >,
     time: Res<Time>,
 ) {
-    //TODO: Fix logic for transition from normal animation cycle to hit animation cycle. We're going to
-    // incorrect animation indices right now.
-    for (mut animation_state, mut prev_animation_state, mut hit_timer, _) in q_fireflies.iter_mut()
-    {
+    for (mut animation_state, mut prev_animation_state, mut hit_timer) in q_fireflies.iter_mut() {
         if let Some(timer) = &mut hit_timer.time {
             timer.tick(time.delta());
             if timer.finished() {
