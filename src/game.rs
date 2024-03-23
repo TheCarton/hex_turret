@@ -10,11 +10,20 @@ use crate::{
 pub(crate) struct GamePlugin;
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
-enum AppState {
+pub(crate) enum AppState {
     #[default]
     AssetLoading,
     InGame,
 }
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct EnterGameSet;
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct FixedUpdateInGameSet;
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct UpdateInGameSet;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
@@ -22,6 +31,12 @@ impl Plugin for GamePlugin {
             .add_loading_state(
                 LoadingState::new(AppState::AssetLoading).continue_to_state(AppState::InGame),
             )
+            .configure_sets(OnEnter(AppState::InGame), EnterGameSet)
+            .configure_sets(
+                FixedUpdate,
+                FixedUpdateInGameSet.run_if(in_state(AppState::InGame)),
+            )
+            .configure_sets(Update, UpdateInGameSet.run_if(in_state(AppState::InGame)))
             .add_plugins(HexPlugin)
             .add_plugins(CameraPluginHexTurret)
             .add_plugins(PlayerPlugin)

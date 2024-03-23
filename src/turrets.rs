@@ -1,10 +1,16 @@
 use bevy::prelude::*;
+use bevy_asset_loader::asset_collection::AssetCollection;
+use bevy_asset_loader::loading_state::config::ConfigureLoadingState;
+use bevy_asset_loader::loading_state::config::LoadingStateConfig;
+use bevy_asset_loader::loading_state::LoadingStateAppExt;
 
 use crate::animation::AnimationIndices;
 use crate::animation::AnimationTimer;
 use crate::constants::PROJECTILE_SPEED;
+use crate::controls::spawn_structure_on_click;
 use crate::controls::PrevSelectedStructure;
 use crate::controls::SelectedStructure;
+use crate::game::AppState;
 use crate::hex::cube_linedraw;
 use crate::hex::Hex;
 use crate::hex::HexControl;
@@ -21,10 +27,13 @@ pub(crate) struct TurretPlugin;
 
 impl Plugin for TurretPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<TurretTextureAtlas>();
-        app.init_resource::<FireflyFactoryTextureAtlas>();
-        app.init_resource::<AntennaTextureAtlasLayout>();
-        app.add_systems(
+        app.configure_loading_state(
+            LoadingStateConfig::new(AppState::AssetLoading)
+                .load_collection::<TurretAssets>()
+                .load_collection::<AntennaAssets>()
+                .load_collection::<FactoryAssets>(),
+        )
+        .add_systems(
             Update,
             (
                 turret_status_from_hex,
@@ -32,8 +41,9 @@ impl Plugin for TurretPlugin {
                 fire_turrets,
                 fire_control_ray,
                 rotate_antennae,
-                change_selected_structure_color,
-            ),
+                change_selected_structure_color.after(spawn_structure_on_click),
+            )
+                .run_if(in_state(AppState::InGame)),
         );
     }
 }
@@ -87,16 +97,11 @@ pub(crate) struct ControlRayBundle {
 pub(crate) struct AntennaBundle {
     pub(crate) antenna: Antenna,
     pub(crate) hex_pos: HexPosition,
-    pub(crate) spritebundle: SpriteSheetBundle,
+    pub(crate) spritebundle: SpriteBundle,
     pub(crate) target_point: AimVec,
     pub(crate) animation_indices: AnimationIndices,
     pub(crate) animation_timer: AnimationTimer,
     pub(crate) reload_timer: ReloadTimer,
-}
-
-#[derive(Resource)]
-pub(crate) struct AntennaTextureAtlasLayout {
-    pub(crate) atlas: Handle<TextureAtlasLayout>,
 }
 
 fn fire_control_ray(
@@ -129,27 +134,8 @@ fn fire_control_ray(
     }
 }
 
-impl FromWorld for AntennaTextureAtlasLayout {
-    fn from_world(world: &mut World) -> Self {
-        let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
-        let texture_handle = asset_server.load("antenna.png");
-        let texture_atlas =
-            TextureAtlasLayout::from_grid(Vec2::new(64f32, 64f32), 1, 1, None, None);
-        let mut texture_atlases = world.get_resource_mut::<Assets<TextureAtlas>>().unwrap();
-        let texture_atlas_handle = texture_atlases.add(texture_atlas);
-        AntennaTextureAtlasLayout {
-            atlas: texture_atlas_handle,
-        }
-    }
-}
-
 #[derive(Component, Default)]
 pub(crate) struct FireflyFactory;
-
-#[derive(Resource)]
-pub(crate) struct FireflyFactoryTextureAtlas {
-    pub(crate) atlas: Handle<TextureAtlasLayout>,
-}
 
 #[derive(Component, Default)]
 pub(crate) struct PrevFactoryState {
@@ -171,14 +157,14 @@ pub(crate) enum FactoryAnimationState {
 }
 
 #[derive(Bundle, Default)]
-pub(crate) struct FireflyFactoryBundle {
+pub(crate) struct FactoryBundle {
     pub(crate) fireflyfactory: FireflyFactory,
     pub(crate) hex_pos: HexPosition,
     pub(crate) prev_animation_state: PrevFactoryState,
     pub(crate) current_animation_state: CurrentFactoryState,
     pub(crate) animation_indices: AnimationIndices,
     pub(crate) animation_timer: AnimationTimer,
-    pub(crate) sprite: SpriteSheetBundle,
+    pub(crate) sprite: SpriteBundle,
     pub(crate) build_timer: BuildTimer,
 }
 
@@ -199,20 +185,6 @@ impl Default for BuildTimer {
     }
 }
 
-impl FromWorld for FireflyFactoryTextureAtlas {
-    fn from_world(world: &mut World) -> Self {
-        let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
-        let texture_handle = asset_server.load("firefly_factory_spritesheet.png");
-        let texture_atlas =
-            TextureAtlas::from_grid(texture_handle, Vec2::new(48f32, 48f32), 1, 1, None, None);
-        let mut texture_atlases = world.get_resource_mut::<Assets<TextureAtlas>>().unwrap();
-        let texture_atlas_handle = texture_atlases.add(texture_atlas);
-        FireflyFactoryTextureAtlas {
-            atlas: texture_atlas_handle,
-        }
-    }
-}
-
 #[derive(Component, Default, Eq, PartialEq)]
 pub(crate) enum TurretStatus {
     #[default]
@@ -229,30 +201,35 @@ pub(crate) struct TurretBundle {
     pub(crate) turret: Turret,
     pub(crate) hex_pos: HexPosition,
     pub(crate) status: TurretStatus,
-    pub(crate) sprite: SpriteSheetBundle,
+    pub(crate) sprite: SpriteBundle,
     pub(crate) reload_timer: ReloadTimer,
     pub(crate) aim: AimVec,
     pub(crate) animation_indices: AnimationIndices,
     pub(crate) animation_timer: AnimationTimer,
 }
 
-#[derive(Resource)]
-pub(crate) struct TurretTextureAtlas {
-    pub(crate) atlas: Handle<TextureAtlasLayout>,
+#[derive(AssetCollection, Resource)]
+pub(crate) struct FactoryAssets {
+    #[asset(texture_atlas_layout(tile_size_x = 48., tile_size_y = 48., columns = 1, rows = 1))]
+    pub(crate) layout: Handle<TextureAtlasLayout>,
+    #[asset(path = "firefly_factory_spritesheet.png")]
+    pub(crate) factory: Handle<Image>,
 }
 
-impl FromWorld for TurretTextureAtlas {
-    fn from_world(world: &mut World) -> Self {
-        let asset_server = world.get_resource_mut::<AssetServer>().unwrap();
-        let texture_handle = asset_server.load("turret.png");
-        let texture_atlas =
-            TextureAtlas::from_grid(texture_handle, Vec2::new(64f32, 64f32), 1, 1, None, None);
-        let mut texture_atlases = world.get_resource_mut::<Assets<TextureAtlas>>().unwrap();
-        let texture_atlas_handle = texture_atlases.add(texture_atlas);
-        TurretTextureAtlas {
-            atlas: texture_atlas_handle,
-        }
-    }
+#[derive(AssetCollection, Resource)]
+pub(crate) struct AntennaAssets {
+    #[asset(texture_atlas_layout(tile_size_x = 64., tile_size_y = 64., columns = 1, rows = 1))]
+    pub(crate) layout: Handle<TextureAtlasLayout>,
+    #[asset(path = "antenna.png")]
+    pub(crate) antenna: Handle<Image>,
+}
+
+#[derive(AssetCollection, Resource)]
+pub(crate) struct TurretAssets {
+    #[asset(texture_atlas_layout(tile_size_x = 64., tile_size_y = 64., columns = 1, rows = 1))]
+    pub(crate) layout: Handle<TextureAtlasLayout>,
+    #[asset(path = "turret.png")]
+    pub(crate) turret: Handle<Image>,
 }
 
 #[derive(Component)]
@@ -329,7 +306,7 @@ fn fire_turrets(
     asset_server: Res<AssetServer>,
     time: Res<Time>,
 ) {
-    for (mut turret, mut reload_timer, aim_vec, _) in q_turrets.iter_mut() {
+    for (mut turret, mut reload_timer, aim_vec) in q_turrets.iter_mut() {
         reload_timer.timer.tick(time.delta());
 
         if let Some(aim_point) = aim_vec.v {
@@ -355,7 +332,7 @@ fn fire_turrets(
 }
 
 fn rotate_antennae(mut q_antennae: Query<(&mut Transform, &AimVec), With<Antenna>>) {
-    for (mut trans, maybe_aim_vec, _) in q_antennae.iter_mut() {
+    for (mut trans, maybe_aim_vec) in q_antennae.iter_mut() {
         if let Some(aim_vec) = maybe_aim_vec.v {
             if let Some(aim_point) = (aim_vec - trans.translation.truncate()).try_normalize() {
                 let rotate_to_aim = Quat::from_rotation_arc(Vec3::Y, aim_point.extend(0f32));
@@ -368,8 +345,11 @@ fn rotate_antennae(mut q_antennae: Query<(&mut Transform, &AimVec), With<Antenna
 fn change_selected_structure_color(
     selected_structure: Res<SelectedStructure>,
     prev_selected_structure: Res<PrevSelectedStructure>,
-    mut q_structure: Query<&mut TextureAtlas>,
+    mut q_structure: Query<&mut Sprite>,
 ) {
+    // thread 'Compute Task Pool (5)' panicked at src/turrets.rs:352:14:
+    // valid structure entity: NoSuchEntity(69v1)
+    // note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
     if let Some(structure_entity) = selected_structure.structure.entity {
         let mut sprite = q_structure
             .get_mut(structure_entity)

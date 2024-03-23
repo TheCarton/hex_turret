@@ -7,6 +7,7 @@ use bevy_asset_loader::prelude::*;
 
 use crate::animation::AnimationIndices;
 use crate::animation::AnimationTimer;
+use crate::game::AppState;
 use crate::turrets::BuildTimer;
 use crate::turrets::FactorySpawnConfig;
 use crate::turrets::FireflyFactory;
@@ -20,6 +21,9 @@ pub(crate) struct EnemiesPlugin;
 impl Plugin for EnemiesPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, setup_factory_spawning);
+        app.configure_loading_state(
+            LoadingStateConfig::new(AppState::AssetLoading).load_collection::<FireflyAssets>(),
+        );
         app.add_systems(
             Update,
             (
@@ -27,7 +31,8 @@ impl Plugin for EnemiesPlugin {
                 move_enemy,
                 despawn_dead_enemies,
                 detect_enemy_player_collision,
-            ),
+            )
+                .run_if(in_state(AppState::InGame)),
         );
     }
 }
@@ -50,7 +55,8 @@ pub(crate) struct FireflyBundle {
     pub(crate) damaged_time: DamagedTime,
     pub(crate) enemy: Enemy,
     pub(crate) health: Health,
-    pub(crate) sprite_bundle: SpriteSheetBundle,
+    pub(crate) sprite_bundle: SpriteBundle,
+    pub(crate) texture_atlas: TextureAtlas,
     pub(crate) animation_indices: AnimationIndices,
     pub(crate) animation_timer: AnimationTimer,
 }
@@ -64,18 +70,11 @@ pub(crate) enum FireflyAnimationState {
 
 #[derive(AssetCollection, Resource)]
 pub(crate) struct FireflyAssets {
-    #[asset(texture_atlas_layout(
-        tile_size_x = 64.,
-        tile_size_y = 64.,
-        columns = 8,
-        rows = 1,
-        padding_x = 12.,
-        padding_y = 12.,
-        offset_x = 6.,
-        offset_y = 6.
-    ))]
+    #[asset(texture_atlas_layout(tile_size_x = 48., tile_size_y = 48., columns = 8, rows = 3))]
     layout: Handle<TextureAtlasLayout>,
-    sprite: Handle<Image>,
+    #[asset(image(sampler = nearest))]
+    #[asset(path = "firefly_spritesheet.png")]
+    firefly: Handle<Image>,
 }
 
 #[derive(Component, Default)]
@@ -127,7 +126,6 @@ fn move_enemy(
 ) {
     let player_transform = param_set.p0().single().clone();
     for mut enemy_transform in param_set.p1().iter_mut() {
-        dbg!(&enemy_transform);
         if let Some(n) =
             (player_transform.translation - enemy_transform.translation).try_normalize()
         {
@@ -164,7 +162,7 @@ fn detect_enemy_player_collision(
 
 fn spawn_fireflies(
     mut commands: Commands,
-    firefly_sprite_sheet: Res<FireflyAssets>,
+    firefly_assets: Res<FireflyAssets>,
     time: Res<Time>,
     mut q_factories: Query<(&Transform, &mut BuildTimer), With<FireflyFactory>>,
 ) {
@@ -173,13 +171,14 @@ fn spawn_fireflies(
         if build_timer.timer.finished() {
             let p = Vec3::new(factory.translation.x, factory.translation.y, 2f32);
             let mut anim_indices = AnimationIndices::firefly_indices();
+            dbg!(&firefly_assets.layout);
             commands.spawn(FireflyBundle {
-                sprite_bundle: SpriteSheetBundle {
-                    sprite: TextureAtlas::new(anim_indices.next_index()),
-                    texture: firefly_sprite_sheet.atlas.clone(),
+                sprite_bundle: SpriteBundle {
+                    texture: firefly_assets.firefly.clone(),
                     transform: Transform::from_translation(p),
                     ..default()
                 },
+                texture_atlas: TextureAtlas::from(firefly_assets.layout.clone()),
                 animation_indices: anim_indices,
                 ..default()
             });

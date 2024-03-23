@@ -91,10 +91,12 @@ fn detect_proj_enemy_collision(
     >,
     mut q_projectiles: Query<(&Transform, &mut Hit), (With<Projectile>, Without<Enemy>)>,
 ) {
-    for (proj, mut proj_hit, _, _) in &mut q_projectiles {
-        for (enemy, mut damage_dur, mut enemy_health, _, _) in &mut q_enemies {
-            let collision = Aabb2d::new(enemy.translation.truncate(), ENEMY_SIZE / 2f32)
-                .intersects(&Aabb2d::new(proj.translation, PROJECTILE_SIZE / 2f32));
+    for (proj, mut proj_hit) in &mut q_projectiles {
+        for (enemy, mut damage_dur, mut enemy_health) in &mut q_enemies {
+            let collision =
+                Aabb2d::new(enemy.translation.truncate(), ENEMY_SIZE / 2f32).intersects(
+                    &Aabb2d::new(proj.translation.truncate(), PROJECTILE_SIZE / 2f32),
+                );
             if collision {
                 proj_hit.has_hit = true;
                 enemy_health.hp -= PROJECTILE_DAMAGE;
@@ -142,7 +144,7 @@ fn despawn_projectiles(
     mut commands: Commands,
     q_projectiles: Query<(Entity, &Distance, &Hit), With<Projectile>>,
 ) {
-    for (entity, dist, hit, _) in &q_projectiles {
+    for (entity, dist, hit) in &q_projectiles {
         if dist.d > PROJECTILE_RANGE || hit.has_hit {
             commands.entity(entity).despawn_recursive();
         }

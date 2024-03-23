@@ -3,10 +3,11 @@ use bevy::{prelude::*, window::PrimaryWindow};
 use crate::{
     camera::MainCamera,
     constants::ANTENNA_FIRE_RATE,
+    game::AppState,
     hex::{Hex, HexMap, HexPosition, HexStatus, HexStructure},
     turrets::{
-        AimVec, Antenna, AntennaBundle, AntennaTextureAtlasLayout, FireflyFactoryBundle,
-        FireflyFactoryTextureAtlas, ReloadTimer, TurretBundle, TurretTextureAtlas,
+        AimVec, Antenna, AntennaAssets, AntennaBundle, FactoryAssets, FactoryBundle, ReloadTimer,
+        TurretAssets, TurretBundle,
     },
 };
 
@@ -27,7 +28,8 @@ impl Plugin for ControlPlugin {
                     update_antenna_target,
                     select_spawn_structure,
                     select_structure,
-                ),
+                )
+                    .run_if(in_state(AppState::InGame)),
             );
     }
 }
@@ -155,13 +157,13 @@ fn select_spawn_structure(
     }
 }
 
-fn spawn_structure_on_click(
+pub(crate) fn spawn_structure_on_click(
     mut commands: Commands,
     mut q_hex: Query<(&HexStatus, &mut HexStructure), With<Hex>>,
     q_hex_map: Query<&HexMap>,
-    turret_texture_atlas: Res<TurretTextureAtlas>,
-    antenna_texture_atlas: Res<AntennaTextureAtlasLayout>,
-    factory_texture_atlas: Res<FireflyFactoryTextureAtlas>,
+    turret_texture_atlas: Res<TurretAssets>,
+    antenna_texture_atlas: Res<AntennaAssets>,
+    factory_texture_atlas: Res<FactoryAssets>,
     cursor_hex: Res<CursorHexPosition>,
     spawn_structure: Res<SpawnSelectedStructure>,
     buttons: Res<ButtonInput<MouseButton>>,
@@ -179,8 +181,8 @@ fn spawn_structure_on_click(
             SpawnSelectedStructure::Turret => commands
                 .spawn(TurretBundle {
                     hex_pos: cursor_hex.hex,
-                    sprite: SpriteSheetBundle {
-                        texture: turret_texture_atlas.atlas.clone(),
+                    sprite: SpriteBundle {
+                        texture: turret_texture_atlas.turret.clone(),
                         transform: Transform::from_xyz(turret_v.x, turret_v.y, 2f32),
                         ..default()
                     },
@@ -188,10 +190,10 @@ fn spawn_structure_on_click(
                 })
                 .id(),
             SpawnSelectedStructure::Factory => commands
-                .spawn(FireflyFactoryBundle {
+                .spawn(FactoryBundle {
                     hex_pos: cursor_hex.hex,
-                    sprite: SpriteSheetBundle {
-                        texture: factory_texture_atlas.atlas.clone(),
+                    sprite: SpriteBundle {
+                        texture: factory_texture_atlas.factory.clone(),
                         transform: Transform::from_xyz(turret_v.x, turret_v.y, 2f32),
                         ..default()
                     },
@@ -202,8 +204,8 @@ fn spawn_structure_on_click(
                 .spawn(AntennaBundle {
                     hex_pos: cursor_hex.hex,
                     reload_timer: ReloadTimer::from(ANTENNA_FIRE_RATE),
-                    spritebundle: SpriteSheetBundle {
-                        texture: antenna_texture_atlas.atlas.clone(),
+                    spritebundle: SpriteBundle {
+                        texture: antenna_texture_atlas.antenna.clone(),
                         transform: Transform::from_xyz(turret_v.x, turret_v.y, 2f32),
                         ..default()
                     },

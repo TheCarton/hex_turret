@@ -4,6 +4,7 @@ use bevy::prelude::*;
 
 use crate::{
     constants::PLAYER_SPEED,
+    game::{EnterGameSet, FixedUpdateInGameSet, UpdateInGameSet},
     hex::{Hex, HexControl, HexMap, HexPosition},
 };
 
@@ -13,10 +14,12 @@ impl Plugin for PlayerPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
             Startup,
-            (spawn_player, spawn_player_hex_control, apply_deferred).chain(),
+            (spawn_player, spawn_player_hex_control, apply_deferred)
+                .chain()
+                .in_set(EnterGameSet),
         );
-        app.add_systems(Update, move_player);
-        app.add_systems(FixedUpdate, player_control_hex);
+        app.add_systems(Update, move_player.in_set(UpdateInGameSet));
+        app.add_systems(FixedUpdate, player_control_hex.in_set(FixedUpdateInGameSet));
     }
 }
 
@@ -57,6 +60,7 @@ fn player_control_hex(
     mut q_player_hex: Query<&mut HexControl, (With<Hex>, Without<Player>)>,
     q_hex_map: Query<&HexMap>,
 ) {
+    // panics
     let (player_control, player_pos) = q_player_hex_control.single();
     let hex_map = q_hex_map.single();
     let hex_id = hex_map.map.get(player_pos);

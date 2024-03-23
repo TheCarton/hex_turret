@@ -116,10 +116,7 @@ fn decay_hex_control(mut hex_query: Query<&mut HexControl, With<Hex>>) {
 // I wish I could tell them that there was no God, but they never believed in one to begin with.
 // I have to reaquaint them with the entire illusion of modernity just to disillusion them.
 
-fn diffuse_hex_control(
-    mut q_hexes: Query<(&HexPosition, &mut HexControl), With<Hex>>,
-    q_hex_map: Query<&HexMap>,
-) {
+fn diffuse_hex_control(mut q_hexes: Query<&mut HexControl, With<Hex>>, q_hex_map: Query<&HexMap>) {
     let hex_map = q_hex_map.single();
     for (pos, entity) in hex_map.map.iter() {
         let neighbor_entities: Vec<&Entity> = pos
