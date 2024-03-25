@@ -2,18 +2,27 @@ use crate::constants::{
     ENEMY_SIZE, FIREFLY_HIT_ANIMATION_DURATION, PROJECTILE_DAMAGE, PROJECTILE_RANGE,
     PROJECTILE_SIZE,
 };
-use crate::enemies::{DamagedTime, Enemy, Health, Hit};
+use crate::enemies::{DamagedTime, Health, Hit, Seeking};
+use crate::game::AppState;
 use crate::hex::HexPosition;
 use crate::turrets::{ControlRay, ControlVec, RayTimer};
 
 use bevy::math::bounding::{Aabb2d, IntersectsVolume};
 use bevy::prelude::*;
+use bevy_asset_loader::asset_collection::AssetCollection;
+use bevy_asset_loader::loading_state::config::{ConfigureLoadingState, LoadingStateConfig};
+use bevy_asset_loader::loading_state::LoadingStateAppExt;
 use derive_more::Add;
 
 pub(crate) struct ProjectilePlugin;
 
 impl Plugin for ProjectilePlugin {
     fn build(&self, app: &mut App) {
+        app.configure_loading_state(
+            LoadingStateConfig::new(AppState::AssetLoading)
+                .load_collection::<TurretProjectileAssets>()
+                .load_collection::<FireflyProjectileAssets>(),
+        );
         app.add_systems(
             Update,
             (
@@ -26,12 +35,45 @@ impl Plugin for ProjectilePlugin {
     }
 }
 
+#[derive(AssetCollection, Resource)]
+pub(crate) struct TurretProjectileAssets {
+    #[asset(texture_atlas_layout(tile_size_x = 6., tile_size_y = 8., columns = 1, rows = 1))]
+    pub(crate) layout: Handle<TextureAtlasLayout>,
+    #[asset(path = "turret_projectile.png")]
+    pub(crate) projectile: Handle<Image>,
+}
+
+#[derive(AssetCollection, Resource)]
+pub(crate) struct FireflyProjectileAssets {
+    #[asset(texture_atlas_layout(tile_size_x = 64., tile_size_y = 64., columns = 1, rows = 1))]
+    pub(crate) layout: Handle<TextureAtlasLayout>,
+    #[asset(path = "firefly_projectile.png")]
+    pub(crate) projectile: Handle<Image>,
+}
+
 #[derive(Component, Default)]
 pub(crate) struct Projectile;
 
+#[derive(Component, Default)]
+pub(crate) struct FireflyProjectile;
+
 #[derive(Bundle, Default)]
-pub(crate) struct ProjectileBundle {
+pub(crate) struct FireflyProjectileBundle {
+    pub(crate) firefly_projectile: FireflyProjectile,
     pub(crate) projectile: Projectile,
+    pub(crate) velocity: Velocity,
+    pub(crate) distance: Distance,
+    pub(crate) sprite: SpriteBundle,
+    pub(crate) hit: Hit,
+}
+
+#[derive(Component, Default)]
+pub(crate) struct TurretProjectile;
+
+#[derive(Bundle, Default)]
+pub(crate) struct TurretProjectileBundle {
+    pub(crate) projectile: Projectile,
+    pub(crate) turret_projectile: TurretProjectile,
     pub(crate) velocity: Velocity,
     pub(crate) distance: Distance,
     pub(crate) sprite: SpriteBundle,
@@ -87,9 +129,9 @@ impl From<f32> for Distance {
 fn detect_proj_enemy_collision(
     mut q_enemies: Query<
         (&Transform, &mut DamagedTime, &mut Health),
-        (With<Enemy>, Without<Projectile>),
+        (With<Seeking>, Without<TurretProjectile>),
     >,
-    mut q_projectiles: Query<(&Transform, &mut Hit), (With<Projectile>, Without<Enemy>)>,
+    mut q_projectiles: Query<(&Transform, &mut Hit), (With<TurretProjectile>, Without<Seeking>)>,
 ) {
     for (proj, mut proj_hit) in &mut q_projectiles {
         for (enemy, mut damage_dur, mut enemy_health) in &mut q_enemies {
@@ -142,7 +184,7 @@ fn update_control_rays(
 
 fn despawn_projectiles(
     mut commands: Commands,
-    q_projectiles: Query<(Entity, &Distance, &Hit), With<Projectile>>,
+    q_projectiles: Query<(Entity, &Distance, &Hit), With<TurretProjectile>>,
 ) {
     for (entity, dist, hit) in &q_projectiles {
         if dist.d > PROJECTILE_RANGE || hit.has_hit {

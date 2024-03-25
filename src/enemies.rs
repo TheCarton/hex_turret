@@ -7,10 +7,17 @@ use bevy_asset_loader::prelude::*;
 
 use crate::animation::AnimationIndices;
 use crate::animation::AnimationTimer;
+use crate::constants::FIREFLY_RANGE;
+use crate::constants::PROJECTILE_SPEED;
 use crate::game::AppState;
+use crate::projectiles::FireflyProjectileAssets;
+use crate::projectiles::FireflyProjectileBundle;
+use crate::projectiles::Velocity;
 use crate::turrets::BuildTimer;
+use crate::turrets::Faction;
 use crate::turrets::FactorySpawnConfig;
 use crate::turrets::FireflyFactory;
+use crate::turrets::ReloadTimer;
 use crate::{
     constants::{ENEMY_HEALTH, ENEMY_SIZE, ENEMY_SPEED, PLAYER_SIZE},
     player::Player,
@@ -28,7 +35,9 @@ impl Plugin for EnemiesPlugin {
             Update,
             (
                 spawn_fireflies,
-                move_enemy,
+                firefly_targeting,
+                fire_firefly_projectiles,
+                move_seeking_units,
                 despawn_dead_enemies,
                 detect_enemy_player_collision,
             )
@@ -46,14 +55,22 @@ pub(crate) fn setup_factory_spawning(mut commands: Commands) {
     })
 }
 
+#[derive(Component, Default, Debug)]
+pub(crate) struct Target {
+    entity: Option<Entity>,
+}
+
 #[derive(Bundle, Default)]
 pub(crate) struct FireflyBundle {
     pub(crate) firefly: Firefly,
+    pub(crate) seeking: Seeking,
+    pub(crate) faction: Faction,
     pub(crate) animation_state: CurrentFireflyAnimationState,
+    pub(crate) target: Target,
+    pub(crate) reload_timer: ReloadTimer,
     pub(crate) prev_animation_state: PrevFireflyAnimationState,
     pub(crate) hit: Hit,
     pub(crate) damaged_time: DamagedTime,
-    pub(crate) enemy: Enemy,
     pub(crate) health: Health,
     pub(crate) sprite_bundle: SpriteBundle,
     pub(crate) texture_atlas: TextureAtlas,
@@ -99,7 +116,7 @@ impl Default for DamagedTime {
 }
 
 #[derive(Component, Default)]
-pub(crate) struct Enemy;
+pub(crate) struct Seeking;
 
 #[derive(Component, Default)]
 pub(crate) struct Hit {
@@ -117,28 +134,42 @@ impl Default for Health {
     }
 }
 
-fn move_enemy(
-    mut param_set: ParamSet<(
-        Query<&Transform, With<Player>>,
-        Query<&mut Transform, With<Enemy>>,
-    )>,
+fn move_seeking_units(
+    q_seeking: Query<(Entity, &Target), With<Seeking>>,
+    mut param_set: ParamSet<(Query<&Transform>, Query<&mut Transform>)>,
     time: Res<Time>,
 ) {
-    let player_transform = param_set.p0().single().clone();
-    for mut enemy_transform in param_set.p1().iter_mut() {
-        if let Some(n) =
-            (player_transform.translation - enemy_transform.translation).try_normalize()
-        {
-            let mut v = n * ENEMY_SPEED * time.delta_seconds();
-            v.z = 0f32;
-            enemy_transform.translation += v;
+    for (seeking_entity, target) in q_seeking.iter() {
+        if let Some(target_entity) = target.entity {
+            let unit_translation = param_set
+                .p0()
+                .get(seeking_entity)
+                .expect("valid entity")
+                .translation;
+            let target_translation = param_set
+                .p0()
+                .get(target_entity)
+                .expect("valid entity")
+                .translation;
+
+            if (unit_translation).distance(target_translation) > FIREFLY_RANGE {
+                let n = (target_translation - unit_translation).normalize();
+                let mut v = n * ENEMY_SPEED * time.delta_seconds();
+                v.z = 0f32;
+                let new_unit_translation = unit_translation + v;
+                param_set
+                    .p1()
+                    .get_mut(seeking_entity)
+                    .expect("valid entity")
+                    .translation = new_unit_translation;
+            }
         }
     }
 }
 
 fn despawn_dead_enemies(
     mut commands: Commands,
-    q_enemies: Query<(Entity, &Health, &Hit), With<Enemy>>,
+    q_enemies: Query<(Entity, &Health, &Hit), With<Seeking>>,
 ) {
     for (enemy_entity, health, hit) in &q_enemies {
         if health.hp <= 0f32 || hit.has_hit {
@@ -148,8 +179,8 @@ fn despawn_dead_enemies(
 }
 
 fn detect_enemy_player_collision(
-    mut q_enemies: Query<(&Transform, &mut Hit), (With<Enemy>, Without<Player>)>,
-    q_player: Query<&Transform, (With<Player>, Without<Enemy>)>,
+    mut q_enemies: Query<(&Transform, &mut Hit), (With<Seeking>, Without<Player>)>,
+    q_player: Query<&Transform, (With<Player>, Without<Seeking>)>,
 ) {
     let player = q_player.single();
     for (enemy, mut enemy_collision) in &mut q_enemies {
@@ -173,6 +204,7 @@ fn spawn_fireflies(
             let mut anim_indices = AnimationIndices::firefly_indices();
             dbg!(&firefly_assets.layout);
             commands.spawn(FireflyBundle {
+                faction: Faction::Hostile,
                 sprite_bundle: SpriteBundle {
                     texture: firefly_assets.firefly.clone(),
                     transform: Transform::from_translation(p),
@@ -182,6 +214,77 @@ fn spawn_fireflies(
                 animation_indices: anim_indices,
                 ..default()
             });
+        }
+    }
+}
+
+fn firefly_targeting(
+    q_firefly: Query<(Entity, &Transform, &Faction), With<Firefly>>,
+    mut param_set: ParamSet<(Query<(Entity, &Transform, &Faction)>, Query<&mut Target>)>,
+) {
+    for (firefly_entity, firefly_transform, firefly_faction) in q_firefly.iter() {
+        if let Some((closest_target, _target_dist)) = param_set
+            .p0()
+            .iter()
+            .filter(|(_, _, faction)| firefly_faction != *faction)
+            .map(|(entity, x, _)| {
+                (
+                    entity,
+                    x.translation.distance(firefly_transform.translation),
+                )
+            })
+            .min_by(|(_, x), (_, y)| x.total_cmp(y))
+        {
+            *param_set
+                .p1()
+                .get_mut(firefly_entity)
+                .expect("valid entity") = Target {
+                entity: Some(closest_target),
+            };
+        }
+    }
+}
+
+fn fire_firefly_projectiles(
+    mut commands: Commands,
+    mut q_fireflies: Query<(&Transform, &Target, &mut ReloadTimer), With<Firefly>>,
+    q_target: Query<&Transform>,
+    projectile_assets: Res<FireflyProjectileAssets>,
+    time: Res<Time>,
+) {
+    for (firefly_transform, target, mut reload_timer) in q_fireflies.iter_mut() {
+        reload_timer.timer.tick(time.delta());
+        if reload_timer.timer.finished() {
+            dbg!("reload finish");
+            dbg!(target);
+            if let Some(target_entity) = target.entity {
+                let target_transform = q_target.get(target_entity).expect("valid entity");
+                if target_transform
+                    .translation
+                    .distance(firefly_transform.translation)
+                    < FIREFLY_RANGE
+                {
+                    let aim_point = (target_transform.translation.truncate()
+                        - firefly_transform.translation.truncate())
+                    .normalize();
+                    let velocity = Velocity::from(aim_point * PROJECTILE_SPEED);
+                    let rotate_to_target = Quat::from_rotation_arc(Vec3::Y, aim_point.extend(0f32));
+                    let transform = Transform {
+                        translation: firefly_transform.translation,
+                        rotation: rotate_to_target,
+                        scale: Vec3::new(0.5f32, 0.5f32, 0.5f32),
+                    };
+                    commands.spawn(FireflyProjectileBundle {
+                        velocity,
+                        sprite: SpriteBundle {
+                            texture: projectile_assets.projectile.clone(),
+                            transform,
+                            ..default()
+                        },
+                        ..default()
+                    });
+                }
+            }
         }
     }
 }

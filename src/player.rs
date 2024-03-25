@@ -6,6 +6,7 @@ use crate::{
     constants::PLAYER_SPEED,
     game::{EnterGameSet, FixedUpdateInGameSet, UpdateInGameSet},
     hex::{Hex, HexControl, HexMap, HexPosition},
+    turrets::Faction,
 };
 
 pub(crate) struct PlayerPlugin;
@@ -29,6 +30,7 @@ pub(crate) struct Player;
 #[derive(Bundle)]
 pub(crate) struct PlayerBundle {
     pub(crate) player: Player,
+    pub(crate) faction: Faction,
     pub(crate) pos: HexPosition,
     pub(crate) sprite: SpriteBundle,
     pub(crate) hex_control: HexControl,
@@ -37,6 +39,7 @@ pub(crate) struct PlayerBundle {
 fn spawn_player(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn(PlayerBundle {
         player: Player,
+        faction: Faction::Friendly,
         pos: HexPosition::default(),
         sprite: SpriteBundle {
             texture: asset_server.load("triangle.png"),
@@ -53,14 +56,11 @@ fn spawn_player(mut commands: Commands, asset_server: Res<AssetServer>) {
 }
 
 fn player_control_hex(
-    q_player_hex_control: Query<
-        (&HexControl, &HexPosition),
-        (Changed<HexPosition>, With<Player>, Without<Hex>),
-    >,
+    q_player_hex_control: Query<(&HexControl, &HexPosition), (With<Player>, Without<Hex>)>,
     mut q_player_hex: Query<&mut HexControl, (With<Hex>, Without<Player>)>,
     q_hex_map: Query<&HexMap>,
 ) {
-    // panics
+    // panics no entities
     let (player_control, player_pos) = q_player_hex_control.single();
     let hex_map = q_hex_map.single();
     let hex_id = hex_map.map.get(player_pos);

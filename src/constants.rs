@@ -29,6 +29,7 @@ pub const ENEMY_HEALTH: f32 = 100f32;
 pub const ENEMY_SIZE: Vec2 = Vec2::new(42f32, 38f32);
 
 pub const FIREFLY_HIT_ANIMATION_DURATION: f32 = 0.5f32;
+pub const FIREFLY_RANGE: f32 = HEX_SIZE * 1.5;
 
 pub const NE: HexPosition = HexPosition { q: 1, r: -1 };
 pub const E: HexPosition = HexPosition { q: 1, r: 0 };

@@ -14,12 +14,13 @@ use crate::game::AppState;
 use crate::hex::cube_linedraw;
 use crate::hex::Hex;
 use crate::hex::HexControl;
-use crate::projectiles::Projectile;
-use crate::projectiles::ProjectileBundle;
+use crate::projectiles::TurretProjectile;
+use crate::projectiles::TurretProjectileAssets;
+use crate::projectiles::TurretProjectileBundle;
 use crate::projectiles::Velocity;
 use crate::{
     constants::{TURRET_RANGE, TURRET_RELOAD_SECONDS},
-    enemies::Enemy,
+    enemies::Seeking,
     hex::{HexMap, HexPosition, HexStatus},
 };
 
@@ -186,7 +187,7 @@ impl Default for BuildTimer {
 }
 
 #[derive(Component, Default, Eq, PartialEq)]
-pub(crate) enum TurretStatus {
+pub(crate) enum Faction {
     #[default]
     Neutral,
     Friendly,
@@ -200,7 +201,7 @@ pub(crate) struct Turret;
 pub(crate) struct TurretBundle {
     pub(crate) turret: Turret,
     pub(crate) hex_pos: HexPosition,
-    pub(crate) status: TurretStatus,
+    pub(crate) faction: Faction,
     pub(crate) sprite: SpriteBundle,
     pub(crate) reload_timer: ReloadTimer,
     pub(crate) aim: AimVec,
@@ -254,7 +255,7 @@ impl From<f32> for ReloadTimer {
 }
 
 fn turret_status_from_hex(
-    mut q_turrets: Query<(&Transform, &mut TurretStatus), With<Turret>>,
+    mut q_turrets: Query<(&Transform, &mut Faction), With<Turret>>,
     q_hex: Query<&HexStatus>,
     q_hex_map: Query<&HexMap>,
 ) {
@@ -267,16 +268,16 @@ fn turret_status_from_hex(
             .unwrap();
         let hex_status = q_hex.get(*hex_entity).unwrap();
         *turret_status = match hex_status {
-            HexStatus::Blue => TurretStatus::Friendly,
-            HexStatus::Neutral => TurretStatus::Neutral,
-            HexStatus::Red => TurretStatus::Friendly,
+            HexStatus::Blue => Faction::Friendly,
+            HexStatus::Neutral => Faction::Neutral,
+            HexStatus::Red => Faction::Friendly,
         };
     }
 }
 
 fn aim_turrets(
-    mut q_turrets: Query<(&Transform, &mut AimVec, &TurretStatus), (With<Turret>, Without<Enemy>)>,
-    q_enemies: Query<&Transform, With<Enemy>>,
+    mut q_turrets: Query<(&Transform, &mut AimVec, &Faction), (With<Turret>, Without<Seeking>)>,
+    q_enemies: Query<&Transform, With<Seeking>>,
 ) {
     for (turret, mut aim, status) in q_turrets.iter_mut() {
         let closest_enemy = q_enemies
@@ -289,7 +290,7 @@ fn aim_turrets(
             })
             .min_by(|(_, x), (_, y)| x.partial_cmp(y).expect("no NaNs"));
         if closest_enemy.is_some_and(|(_, dist)| dist < TURRET_RANGE)
-            && *status == TurretStatus::Friendly
+            && *status == Faction::Friendly
         {
             let (target, _) = closest_enemy.unwrap();
             let aim_point = (target.truncate() - turret.translation.truncate()).try_normalize();
@@ -303,7 +304,7 @@ fn aim_turrets(
 fn fire_turrets(
     mut commands: Commands,
     mut q_turrets: Query<(&mut Transform, &mut ReloadTimer, &AimVec), With<Turret>>,
-    asset_server: Res<AssetServer>,
+    projectile_assets: Res<TurretProjectileAssets>,
     time: Res<Time>,
 ) {
     for (mut turret, mut reload_timer, aim_vec) in q_turrets.iter_mut() {
@@ -316,11 +317,10 @@ fn fire_turrets(
             let rotate_to_enemy = Quat::from_rotation_arc(Vec3::Y, aim_point.extend(0f32));
             turret.rotation = rotate_to_enemy;
             if reload_timer.timer.finished() {
-                commands.spawn(ProjectileBundle {
-                    projectile: Projectile,
+                commands.spawn(TurretProjectileBundle {
                     velocity,
                     sprite: SpriteBundle {
-                        texture: asset_server.load("projectile.png"),
+                        texture: projectile_assets.projectile.clone(),
                         transform: *turret,
                         ..default()
                     },

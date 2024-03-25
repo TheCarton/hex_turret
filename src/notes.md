@@ -1,8 +1,16 @@
 Soon:
 
-update hexmap to be not dumb
+add health to everything
 
-update to bevy 13
+make fireflies shoot at you
+
+add unit that creates small hex control field
+
+make factory spawn based on hex control
+
+make friendly fireflies
+
+update hexmap to be not dumb
 
 add a character that is less terrible
 
