@@ -5,8 +5,7 @@ use bevy::prelude::*;
 use crate::{
     constants::PLAYER_SPEED,
     game::{EnterGameSet, FixedUpdateInGameSet, UpdateInGameSet},
-    hex::{Hex, HexControl, HexMap, HexPosition},
-    turrets::Faction,
+    hex::{Hex, HexControl, HexFaction, HexMap, HexPosition},
 };
 
 pub(crate) struct PlayerPlugin;
@@ -30,7 +29,7 @@ pub(crate) struct Player;
 #[derive(Bundle)]
 pub(crate) struct PlayerBundle {
     pub(crate) player: Player,
-    pub(crate) faction: Faction,
+    pub(crate) faction: HexFaction,
     pub(crate) pos: HexPosition,
     pub(crate) sprite: SpriteBundle,
     pub(crate) hex_control: HexControl,
@@ -39,7 +38,7 @@ pub(crate) struct PlayerBundle {
 fn spawn_player(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn(PlayerBundle {
         player: Player,
-        faction: Faction::Friendly,
+        faction: HexFaction::Friendly,
         pos: HexPosition::default(),
         sprite: SpriteBundle {
             texture: asset_server.load("triangle.png"),

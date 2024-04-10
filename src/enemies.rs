@@ -1,3 +1,4 @@
+use bevy::log::tracing_subscriber::field::debug;
 use bevy::math::bounding::Aabb2d;
 use bevy::math::bounding::IntersectsVolume;
 use bevy::prelude::*;
@@ -7,19 +8,22 @@ use bevy_asset_loader::prelude::*;
 
 use crate::animation::AnimationIndices;
 use crate::animation::AnimationTimer;
+use crate::constants::FIREFLY_BULLET_SCALE;
 use crate::constants::FIREFLY_RANGE;
 use crate::constants::PROJECTILE_SPEED;
 use crate::game::AppState;
+use crate::hex::Hex;
+use crate::hex::HexFaction;
+use crate::projectiles::spawn_projectile;
 use crate::projectiles::FireflyProjectileAssets;
-use crate::projectiles::FireflyProjectileBundle;
-use crate::projectiles::Velocity;
+use crate::projectiles::ProjectileType;
 use crate::turrets::BuildTimer;
-use crate::turrets::Faction;
+use crate::turrets::FactoryEnergy;
 use crate::turrets::FactorySpawnConfig;
 use crate::turrets::FireflyFactory;
 use crate::turrets::ReloadTimer;
 use crate::{
-    constants::{ENEMY_HEALTH, ENEMY_SIZE, ENEMY_SPEED, PLAYER_SIZE},
+    constants::{FIREFLY_HEALTH, FIREFLY_SIZE, FIREFLY_SPEED, PLAYER_SIZE},
     player::Player,
 };
 
@@ -37,8 +41,9 @@ impl Plugin for EnemiesPlugin {
                 spawn_fireflies,
                 firefly_targeting,
                 fire_firefly_projectiles,
+                update_firefly_hit_state,
                 move_seeking_units,
-                despawn_dead_enemies,
+                despawn_dead_mortals,
                 detect_enemy_player_collision,
             )
                 .run_if(in_state(AppState::InGame)),
@@ -48,6 +53,18 @@ impl Plugin for EnemiesPlugin {
 
 #[derive(Component, Default)]
 pub(crate) struct Firefly;
+
+#[derive(Component, Default)]
+pub(crate) struct Hittable {
+    pub(crate) hitbox: Vec2,
+    pub(crate) hit: bool,
+}
+
+impl Hittable {
+    pub(crate) fn from_hitbox(hitbox: Vec2) -> Hittable {
+        Hittable { hitbox, hit: false }
+    }
+}
 
 pub(crate) fn setup_factory_spawning(mut commands: Commands) {
     commands.insert_resource(FactorySpawnConfig {
@@ -63,8 +80,9 @@ pub(crate) struct Target {
 #[derive(Bundle, Default)]
 pub(crate) struct FireflyBundle {
     pub(crate) firefly: Firefly,
+    pub(crate) hittable: Hittable,
     pub(crate) seeking: Seeking,
-    pub(crate) faction: Faction,
+    pub(crate) faction: HexFaction,
     pub(crate) animation_state: CurrentFireflyAnimationState,
     pub(crate) target: Target,
     pub(crate) reload_timer: ReloadTimer,
@@ -128,9 +146,15 @@ pub(crate) struct Health {
     pub(crate) hp: f32,
 }
 
+impl From<f32> for Health {
+    fn from(value: f32) -> Self {
+        Health { hp: value }
+    }
+}
+
 impl Default for Health {
     fn default() -> Self {
-        Health { hp: ENEMY_HEALTH }
+        Health { hp: FIREFLY_HEALTH }
     }
 }
 
@@ -146,34 +170,38 @@ fn move_seeking_units(
                 .get(seeking_entity)
                 .expect("valid entity")
                 .translation;
-            let target_translation = param_set
-                .p0()
-                .get(target_entity)
-                .expect("valid entity")
-                .translation;
-
-            if (unit_translation).distance(target_translation) > FIREFLY_RANGE {
-                let n = (target_translation - unit_translation).normalize();
-                let mut v = n * ENEMY_SPEED * time.delta_seconds();
-                v.z = 0f32;
-                let new_unit_translation = unit_translation + v;
-                param_set
-                    .p1()
-                    .get_mut(seeking_entity)
-                    .expect("valid entity")
-                    .translation = new_unit_translation;
+            if let Ok(target) = param_set.p0().get(target_entity) {
+                if (unit_translation).distance(target.translation) > FIREFLY_RANGE {
+                    let n = (target.translation - unit_translation).normalize();
+                    let mut v = n * FIREFLY_SPEED * time.delta_seconds();
+                    v.z = 0f32;
+                    let new_unit_translation = unit_translation + v;
+                    param_set
+                        .p1()
+                        .get_mut(seeking_entity)
+                        .expect("valid entity")
+                        .translation = new_unit_translation;
+                }
             }
         }
     }
 }
 
-fn despawn_dead_enemies(
-    mut commands: Commands,
-    q_enemies: Query<(Entity, &Health, &Hit), With<Seeking>>,
-) {
-    for (enemy_entity, health, hit) in &q_enemies {
-        if health.hp <= 0f32 || hit.has_hit {
-            commands.entity(enemy_entity).despawn();
+fn update_firefly_hit_state(mut q_fireflies: Query<(&mut DamagedTime, &mut Hittable)>) {
+    for (mut damage_time, mut hittable) in q_fireflies.iter_mut() {
+        if hittable.hit {
+            *damage_time = DamagedTime {
+                time: Some(Timer::from_seconds(0.5f32, TimerMode::Once)),
+            };
+            hittable.hit = false;
+        }
+    }
+}
+
+fn despawn_dead_mortals(mut commands: Commands, q_mortal: Query<(Entity, &Health)>) {
+    for (mortal_entity, health) in &q_mortal {
+        if health.hp <= 0f32 {
+            commands.entity(mortal_entity).despawn();
         }
     }
 }
@@ -184,27 +212,31 @@ fn detect_enemy_player_collision(
 ) {
     let player = q_player.single();
     for (enemy, mut enemy_collision) in &mut q_enemies {
-        let collision = Aabb2d::new(enemy.translation.truncate(), ENEMY_SIZE / 2f32).intersects(
+        let collision = Aabb2d::new(enemy.translation.truncate(), FIREFLY_SIZE / 2f32).intersects(
             &Aabb2d::new(player.translation.truncate(), PLAYER_SIZE / 2f32),
         );
         enemy_collision.has_hit = collision;
     }
 }
 
+pub const FIREFLY_ENERGY_COST: f32 = 15f32;
+
 fn spawn_fireflies(
     mut commands: Commands,
     firefly_assets: Res<FireflyAssets>,
     time: Res<Time>,
-    mut q_factories: Query<(&Transform, &mut BuildTimer), With<FireflyFactory>>,
+    mut q_factories: Query<(&Transform, &mut BuildTimer, &mut FactoryEnergy), With<FireflyFactory>>,
 ) {
-    for (factory, mut build_timer) in q_factories.iter_mut() {
+    for (factory, mut build_timer, mut factory_energy) in q_factories.iter_mut() {
         build_timer.timer.tick(time.delta());
         if build_timer.timer.finished() {
             let p = Vec3::new(factory.translation.x, factory.translation.y, 2f32);
-            let mut anim_indices = AnimationIndices::firefly_indices();
-            dbg!(&firefly_assets.layout);
+            let anim_indices = AnimationIndices::firefly_indices();
+            let faction = factory_energy.energy.max_status();
+            factory_energy.energy[faction] -= FIREFLY_ENERGY_COST;
             commands.spawn(FireflyBundle {
-                faction: Faction::Hostile,
+                faction,
+                hittable: Hittable::from_hitbox(FIREFLY_SIZE),
                 sprite_bundle: SpriteBundle {
                     texture: firefly_assets.firefly.clone(),
                     transform: Transform::from_translation(p),
@@ -219,8 +251,11 @@ fn spawn_fireflies(
 }
 
 fn firefly_targeting(
-    q_firefly: Query<(Entity, &Transform, &Faction), With<Firefly>>,
-    mut param_set: ParamSet<(Query<(Entity, &Transform, &Faction)>, Query<&mut Target>)>,
+    q_firefly: Query<(Entity, &Transform, &HexFaction), With<Firefly>>,
+    mut param_set: ParamSet<(
+        Query<(Entity, &Transform, &HexFaction), Without<Hex>>,
+        Query<&mut Target>,
+    )>,
 ) {
     for (firefly_entity, firefly_transform, firefly_faction) in q_firefly.iter() {
         if let Some((closest_target, _target_dist)) = param_set
@@ -255,8 +290,6 @@ fn fire_firefly_projectiles(
     for (firefly_transform, target, mut reload_timer) in q_fireflies.iter_mut() {
         reload_timer.timer.tick(time.delta());
         if reload_timer.timer.finished() {
-            dbg!("reload finish");
-            dbg!(target);
             if let Some(target_entity) = target.entity {
                 let target_transform = q_target.get(target_entity).expect("valid entity");
                 if target_transform
@@ -264,25 +297,27 @@ fn fire_firefly_projectiles(
                     .distance(firefly_transform.translation)
                     < FIREFLY_RANGE
                 {
-                    let aim_point = (target_transform.translation.truncate()
+                    let aim_vector = (target_transform.translation.truncate()
                         - firefly_transform.translation.truncate())
                     .normalize();
-                    let velocity = Velocity::from(aim_point * PROJECTILE_SPEED);
-                    let rotate_to_target = Quat::from_rotation_arc(Vec3::Y, aim_point.extend(0f32));
+                    let velocity = aim_vector * PROJECTILE_SPEED;
+                    let rotate_to_target =
+                        Quat::from_rotation_arc(Vec3::Y, aim_vector.extend(0f32));
+
+                    let projectile_translation = firefly_transform.translation
+                        + (aim_vector * FIREFLY_SIZE).extend(firefly_transform.translation.z);
                     let transform = Transform {
-                        translation: firefly_transform.translation,
+                        translation: projectile_translation,
                         rotation: rotate_to_target,
-                        scale: Vec3::new(0.5f32, 0.5f32, 0.5f32),
+                        scale: FIREFLY_BULLET_SCALE,
                     };
-                    commands.spawn(FireflyProjectileBundle {
+                    spawn_projectile(
+                        &mut commands,
+                        ProjectileType::FireflyBullet,
                         velocity,
-                        sprite: SpriteBundle {
-                            texture: projectile_assets.projectile.clone(),
-                            transform,
-                            ..default()
-                        },
-                        ..default()
-                    });
+                        projectile_assets.projectile.clone(),
+                        transform,
+                    );
                 }
             }
         }

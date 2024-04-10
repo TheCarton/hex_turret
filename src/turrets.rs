@@ -7,21 +7,23 @@ use bevy_asset_loader::loading_state::LoadingStateAppExt;
 use crate::animation::AnimationIndices;
 use crate::animation::AnimationTimer;
 use crate::constants::PROJECTILE_SPEED;
+use crate::constants::TURRET_SIZE;
 use crate::controls::spawn_structure_on_click;
-use crate::controls::PrevSelectedStructure;
 use crate::controls::SelectedStructure;
+use crate::enemies::Health;
+use crate::enemies::Hittable;
 use crate::game::AppState;
 use crate::hex::cube_linedraw;
 use crate::hex::Hex;
 use crate::hex::HexControl;
-use crate::projectiles::TurretProjectile;
+use crate::projectiles::spawn_projectile;
+use crate::projectiles::ProjectileType;
 use crate::projectiles::TurretProjectileAssets;
-use crate::projectiles::TurretProjectileBundle;
 use crate::projectiles::Velocity;
 use crate::{
     constants::{TURRET_RANGE, TURRET_RELOAD_SECONDS},
     enemies::Seeking,
-    hex::{HexMap, HexPosition, HexStatus},
+    hex::{HexFaction, HexMap, HexPosition},
 };
 
 pub(crate) struct TurretPlugin;
@@ -37,11 +39,12 @@ impl Plugin for TurretPlugin {
         .add_systems(
             Update,
             (
-                turret_status_from_hex,
+                structure_faction_from_hex,
                 aim_turrets,
                 fire_turrets,
                 fire_control_ray,
                 rotate_antennae,
+                update_factory_energy,
                 change_selected_structure_color.after(spawn_structure_on_click),
             )
                 .run_if(in_state(AppState::InGame)),
@@ -62,6 +65,9 @@ impl Default for AimVec {
 
 #[derive(Component, Default)]
 pub(crate) struct Antenna;
+
+#[derive(Component, Default)]
+pub(crate) struct Structure;
 
 #[derive(Component, Default, Debug)]
 pub(crate) struct ControlVec {
@@ -97,6 +103,11 @@ pub(crate) struct ControlRayBundle {
 #[derive(Bundle, Default)]
 pub(crate) struct AntennaBundle {
     pub(crate) antenna: Antenna,
+
+    pub(crate) structure: Structure,
+    pub(crate) health: Health,
+    pub(crate) faction: HexFaction,
+    pub(crate) hittable: Hittable,
     pub(crate) hex_pos: HexPosition,
     pub(crate) spritebundle: SpriteBundle,
     pub(crate) target_point: AimVec,
@@ -157,9 +168,19 @@ pub(crate) enum FactoryAnimationState {
     Malfunctioning,
 }
 
+#[derive(Component, Default)]
+pub(crate) struct FactoryEnergy {
+    pub(crate) energy: HexControl,
+}
+
 #[derive(Bundle, Default)]
 pub(crate) struct FactoryBundle {
     pub(crate) fireflyfactory: FireflyFactory,
+    pub(crate) structure: Structure,
+    pub(crate) hittable: Hittable,
+    pub(crate) faction: HexFaction,
+    pub(crate) factory_energy: FactoryEnergy,
+    pub(crate) health: Health,
     pub(crate) hex_pos: HexPosition,
     pub(crate) prev_animation_state: PrevFactoryState,
     pub(crate) current_animation_state: CurrentFactoryState,
@@ -173,6 +194,7 @@ pub(crate) struct FactoryBundle {
 pub(crate) struct FactorySpawnConfig {
     pub(crate) timer: Timer,
 }
+
 #[derive(Component)]
 pub(crate) struct BuildTimer {
     pub(crate) timer: Timer,
@@ -186,12 +208,19 @@ impl Default for BuildTimer {
     }
 }
 
-#[derive(Component, Default, Eq, PartialEq)]
-pub(crate) enum Faction {
-    #[default]
-    Neutral,
-    Friendly,
-    Hostile,
+fn update_factory_energy(
+    mut q_factory: Query<(&Transform, &mut FactoryEnergy)>,
+    q_hex: Query<&HexControl>,
+    q_hex_map: Query<&HexMap>,
+) {
+    let hex_map = q_hex_map.single();
+    for (transform, mut factory_energy) in q_factory.iter_mut() {
+        let hex_pos = HexPosition::from_pixel(transform.translation.truncate());
+        let hex_entity = hex_map.map.get(&hex_pos).expect("valid hex pos");
+        if let Ok(hex_control) = q_hex.get(*hex_entity) {
+            factory_energy.energy = *hex_control;
+        }
+    }
 }
 
 #[derive(Component, Default)]
@@ -200,8 +229,11 @@ pub(crate) struct Turret;
 #[derive(Bundle, Default)]
 pub(crate) struct TurretBundle {
     pub(crate) turret: Turret,
+    pub(crate) structure: Structure,
+    pub(crate) health: Health,
+    pub(crate) hittable: Hittable,
     pub(crate) hex_pos: HexPosition,
-    pub(crate) faction: Faction,
+    pub(crate) faction: HexFaction,
     pub(crate) sprite: SpriteBundle,
     pub(crate) reload_timer: ReloadTimer,
     pub(crate) aim: AimVec,
@@ -254,47 +286,47 @@ impl From<f32> for ReloadTimer {
     }
 }
 
-fn turret_status_from_hex(
-    mut q_turrets: Query<(&Transform, &mut Faction), With<Turret>>,
-    q_hex: Query<&HexStatus>,
+fn structure_faction_from_hex(
+    mut q_turrets: Query<(&Transform, &mut HexFaction), (With<Structure>, Without<Hex>)>,
+    q_hex: Query<&HexFaction, (Without<Structure>, With<Hex>)>,
     q_hex_map: Query<&HexMap>,
 ) {
     let hex_map = q_hex_map.single();
-    for (turret, mut turret_status) in q_turrets.iter_mut() {
-        let turret_hex = HexPosition::from_pixel(turret.translation.xy());
+    for (transform, mut hex_faction) in q_turrets.iter_mut() {
         let hex_entity = hex_map
             .map
-            .get(&HexPosition::from_pixel(turret.translation.xy()))
+            .get(&HexPosition::from_pixel(transform.translation.xy()))
             .unwrap();
         let hex_status = q_hex.get(*hex_entity).unwrap();
-        *turret_status = match hex_status {
-            HexStatus::Blue => Faction::Friendly,
-            HexStatus::Neutral => Faction::Neutral,
-            HexStatus::Red => Faction::Friendly,
-        };
+        *hex_faction = *hex_status;
     }
 }
 
 fn aim_turrets(
-    mut q_turrets: Query<(&Transform, &mut AimVec, &Faction), (With<Turret>, Without<Seeking>)>,
-    q_enemies: Query<&Transform, With<Seeking>>,
+    mut q_turrets: Query<(&Transform, &mut AimVec, &HexFaction), (With<Turret>, Without<Seeking>)>,
+    q_enemies: Query<(Entity, &Transform), With<Seeking>>,
+    q_target: Query<&HexFaction>,
 ) {
-    for (turret, mut aim, status) in q_turrets.iter_mut() {
-        let closest_enemy = q_enemies
+    for (transform, mut aim, turret_faction) in q_turrets.iter_mut() {
+        let valid_target = q_enemies
             .iter()
-            .map(|enemy| {
+            .filter(|(entity, _target)| {
+                let target_faction = q_target.get(*entity).expect("valid entity");
+                turret_faction != target_faction
+            })
+            .map(|(_entity, transform)| {
                 (
-                    enemy.translation,
-                    enemy.translation.distance(turret.translation),
+                    transform.translation,
+                    transform.translation.distance(transform.translation),
                 )
             })
             .min_by(|(_, x), (_, y)| x.partial_cmp(y).expect("no NaNs"));
-        if closest_enemy.is_some_and(|(_, dist)| dist < TURRET_RANGE)
-            && *status == Faction::Friendly
-        {
-            let (target, _) = closest_enemy.unwrap();
-            let aim_point = (target.truncate() - turret.translation.truncate()).try_normalize();
-            *aim = AimVec { v: aim_point }
+        if let Some((target_coords, target_dist)) = valid_target {
+            if target_dist < TURRET_RANGE {
+                let aim_point =
+                    (target_coords.truncate() - transform.translation.truncate()).try_normalize();
+                *aim = AimVec { v: aim_point }
+            }
         } else {
             *aim = AimVec::default();
         }
@@ -310,22 +342,26 @@ fn fire_turrets(
     for (mut turret, mut reload_timer, aim_vec) in q_turrets.iter_mut() {
         reload_timer.timer.tick(time.delta());
 
-        if let Some(aim_point) = aim_vec.v {
-            let velocity = Velocity {
-                v: aim_point * PROJECTILE_SPEED,
-            };
-            let rotate_to_enemy = Quat::from_rotation_arc(Vec3::Y, aim_point.extend(0f32));
+        if let Some(aim_vector) = aim_vec.v {
+            let velocity = aim_vector * PROJECTILE_SPEED;
+            let rotate_to_enemy = Quat::from_rotation_arc(Vec3::Y, aim_vector.extend(0f32));
             turret.rotation = rotate_to_enemy;
+
+            let projectile_translation =
+                turret.translation + (aim_vector * TURRET_SIZE).extend(turret.translation.z);
             if reload_timer.timer.finished() {
-                commands.spawn(TurretProjectileBundle {
+                let transform = Transform {
+                    translation: projectile_translation,
+                    rotation: rotate_to_enemy,
+                    scale: Vec3::new(1f32, 1f32, 1f32),
+                };
+                spawn_projectile(
+                    &mut commands,
+                    ProjectileType::TurretBullet,
                     velocity,
-                    sprite: SpriteBundle {
-                        texture: projectile_assets.projectile.clone(),
-                        transform: *turret,
-                        ..default()
-                    },
-                    ..default()
-                });
+                    projectile_assets.projectile.clone(),
+                    transform,
+                );
             }
         }
     }
@@ -344,26 +380,20 @@ fn rotate_antennae(mut q_antennae: Query<(&mut Transform, &AimVec), With<Antenna
 
 fn change_selected_structure_color(
     selected_structure: Res<SelectedStructure>,
-    prev_selected_structure: Res<PrevSelectedStructure>,
     mut q_structure: Query<&mut Sprite>,
 ) {
-    // thread 'Compute Task Pool (5)' panicked at src/turrets.rs:352:14:
-    // valid structure entity: NoSuchEntity(69v1)
-    // note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
-    if let Some(structure_entity) = selected_structure.structure.entity {
-        let mut sprite = q_structure
-            .get_mut(structure_entity)
-            .expect("valid structure entity");
-        sprite.color.set_r(1f32);
-        sprite.color.set_g(0f32);
-        sprite.color.set_b(0f32);
-    }
-    if let Some(structure_entity) = prev_selected_structure.structure.entity {
-        let mut sprite = q_structure
-            .get_mut(structure_entity)
-            .expect("valid structure entity");
-        sprite.color.set_r(1f32);
-        sprite.color.set_g(1f32);
-        sprite.color.set_b(1f32);
+    if let Some(structure_entity) = selected_structure.curr_structure {
+        if let Ok(mut sprite) = q_structure.get_mut(structure_entity) {
+            sprite.color.set_r(1f32);
+            sprite.color.set_g(0f32);
+            sprite.color.set_b(0f32);
+        }
+        if let Some(structure_entity) = selected_structure.prev_structure {
+            if let Ok(mut sprite) = q_structure.get_mut(structure_entity) {
+                sprite.color.set_r(1f32);
+                sprite.color.set_g(1f32);
+                sprite.color.set_b(1f32);
+            }
+        }
     }
 }

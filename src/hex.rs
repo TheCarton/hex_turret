@@ -84,7 +84,7 @@ pub(crate) fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) 
                 |hex_pos| {
                     builder.spawn(HexBundle {
                         pos: *hex_pos,
-                        status: HexStatus::Neutral,
+                        status: HexFaction::Neutral,
                         sprite: SpriteBundle {
                             texture: asset_server.load("blue_hex.png"),
                             transform: Transform::from_xyz(
@@ -129,7 +129,7 @@ fn diffuse_hex_control(mut q_hexes: Query<&mut HexControl, With<Hex>>, q_hex_map
             let hex_entities: [Entity; 2] = [*entity, *adj_entity];
             let [mut hex_control, mut adj_control] = q_hexes.many_mut(hex_entities);
             let prev_control = hex_control.clone();
-            for status_color in [HexStatus::Red, HexStatus::Blue] {
+            for status_color in [HexFaction::Hostile, HexFaction::Friendly] {
                 if adj_control[status_color] < hex_control[status_color] {
                     let fraction_change = (prev_control[status_color] - adj_control[status_color])
                         / prev_control[status_color];
@@ -154,9 +154,17 @@ pub(crate) fn populate_map(
     }
 }
 
-fn update_hexes(mut hex_query: Query<(&HexControl, &mut HexStatus), With<Hex>>) {
-    for (control, mut hex_status) in hex_query.iter_mut() {
+fn update_hexes(
+    mut hex_query: Query<(&HexControl, &mut HexFaction, &mut HexStructure), With<Hex>>,
+    q_structure: Query<Entity>,
+) {
+    for (control, mut hex_status, mut structure) in hex_query.iter_mut() {
         *hex_status = control.max_status();
+        if let Some(h_structure) = structure.entity {
+            if q_structure.get(h_structure).is_err() {
+                structure.entity = None;
+            }
+        }
     }
 }
 
@@ -205,6 +213,10 @@ impl HexStructure {
     pub(crate) fn from_id(id: Entity) -> HexStructure {
         HexStructure { entity: Some(id) }
     }
+
+    pub(crate) fn no_structure() -> HexStructure {
+        HexStructure { entity: None }
+    }
 }
 
 #[derive(Bundle, Default)]
@@ -212,22 +224,27 @@ pub(crate) struct HexBundle {
     pub(crate) hex: Hex,
     pub(crate) structure: HexStructure,
     pub(crate) pos: HexPosition,
-    pub(crate) status: HexStatus,
+    pub(crate) status: HexFaction,
     pub(crate) sprite: SpriteBundle,
     pub(crate) control: HexControl,
 }
 
 #[derive(Component, Eq, PartialEq, Default, Clone, Copy, Debug)]
-pub(crate) enum HexStatus {
-    Blue,
+pub(crate) enum HexFaction {
+    Friendly,
     #[default]
     Neutral,
-    Red,
+    Hostile,
 }
 
-impl HexStatus {
-    fn into_iter() -> std::array::IntoIter<HexStatus, 3> {
-        [HexStatus::Red, HexStatus::Blue, HexStatus::Neutral].into_iter()
+impl HexFaction {
+    fn into_iter() -> std::array::IntoIter<HexFaction, 3> {
+        [
+            HexFaction::Hostile,
+            HexFaction::Friendly,
+            HexFaction::Neutral,
+        ]
+        .into_iter()
     }
 }
 
@@ -241,9 +258,9 @@ pub(crate) struct HexControl {
 impl Default for HexControl {
     fn default() -> Self {
         HexControl {
-            red: 0f32,
+            red: 100f32,
             blue: 0f32,
-            neutral: 100f32,
+            neutral: 0f32,
         }
     }
 }
@@ -281,42 +298,42 @@ impl Ord for HexControl {
 
 impl Eq for HexControl {} // weird.
 
-impl Index<HexStatus> for HexControl {
+impl Index<HexFaction> for HexControl {
     type Output = f32;
 
-    fn index(&self, status: HexStatus) -> &Self::Output {
+    fn index(&self, status: HexFaction) -> &Self::Output {
         match status {
-            HexStatus::Red => &self.red,
-            HexStatus::Blue => &self.blue,
-            HexStatus::Neutral => &self.neutral,
+            HexFaction::Hostile => &self.red,
+            HexFaction::Friendly => &self.blue,
+            HexFaction::Neutral => &self.neutral,
         }
     }
 }
 
-impl IndexMut<HexStatus> for HexControl {
-    fn index_mut(&mut self, status: HexStatus) -> &mut Self::Output {
+impl IndexMut<HexFaction> for HexControl {
+    fn index_mut(&mut self, status: HexFaction) -> &mut Self::Output {
         match status {
-            HexStatus::Red => &mut self.red,
-            HexStatus::Blue => &mut self.blue,
-            HexStatus::Neutral => &mut self.neutral,
+            HexFaction::Hostile => &mut self.red,
+            HexFaction::Friendly => &mut self.blue,
+            HexFaction::Neutral => &mut self.neutral,
         }
     }
 }
 
 impl HexControl {
-    fn len() -> usize {
+    pub(crate) fn len() -> usize {
         3
     }
 
-    fn to_array(&self) -> [(HexStatus, f32); 3] {
+    pub(crate) fn to_array(&self) -> [(HexFaction, f32); 3] {
         [
-            (HexStatus::Red, self.red),
-            (HexStatus::Blue, self.blue),
-            (HexStatus::Neutral, self.neutral),
+            (HexFaction::Hostile, self.red),
+            (HexFaction::Friendly, self.blue),
+            (HexFaction::Neutral, self.neutral),
         ]
     }
 
-    fn max_status(&self) -> HexStatus {
+    pub(crate) fn max_status(&self) -> HexFaction {
         let (status, _val) = self
             .to_array()
             .into_iter()

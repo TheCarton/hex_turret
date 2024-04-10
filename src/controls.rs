@@ -2,9 +2,10 @@ use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::{
     camera::MainCamera,
-    constants::ANTENNA_FIRE_RATE,
+    constants::{ANTENNA_FIRE_RATE, ANTENNA_SIZE, FACTORY_SIZE, TURRET_HEALTH, TURRET_SIZE},
+    enemies::{Health, Hittable},
     game::AppState,
-    hex::{Hex, HexMap, HexPosition, HexStatus, HexStructure},
+    hex::{Hex, HexFaction, HexMap, HexPosition, HexStructure},
     turrets::{
         AimVec, Antenna, AntennaAssets, AntennaBundle, FactoryAssets, FactoryBundle, ReloadTimer,
         TurretAssets, TurretBundle,
@@ -18,7 +19,6 @@ impl Plugin for ControlPlugin {
         app.init_resource::<CursorWorldCoords>()
             .init_resource::<CursorHexPosition>()
             .init_resource::<SpawnSelectedStructure>()
-            .init_resource::<PrevSelectedStructure>()
             .init_resource::<SelectedStructure>()
             .add_systems(
                 Update,
@@ -44,14 +44,10 @@ pub(crate) struct CursorHexPosition {
     pub(crate) hex: HexPosition,
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Copy, Clone)]
 pub(crate) struct SelectedStructure {
-    pub(crate) structure: HexStructure,
-}
-
-#[derive(Resource, Default)]
-pub(crate) struct PrevSelectedStructure {
-    pub(crate) structure: HexStructure,
+    pub(crate) curr_structure: Option<Entity>,
+    pub(crate) prev_structure: Option<Entity>,
 }
 
 #[derive(Resource, Default)]
@@ -95,7 +91,7 @@ fn update_antenna_target(
     buttons: Res<ButtonInput<MouseButton>>,
 ) {
     match (
-        selected_structure.structure.entity,
+        selected_structure.curr_structure,
         buttons.get_pressed().last(),
     ) {
         // TODO: Add a target component to the antenna bundle and use that to calculate the aim vector and hex aim point.
@@ -119,7 +115,6 @@ fn update_antenna_target(
 
 fn select_structure(
     mut selected_structure: ResMut<SelectedStructure>,
-    mut prev_selected_structure: ResMut<PrevSelectedStructure>,
     cursor_hex: Res<CursorHexPosition>,
     q_hex_map: Query<&HexMap>,
     q_hex: Query<&HexStructure>,
@@ -129,18 +124,17 @@ fn select_structure(
         let hex_map = q_hex_map.single();
         if let Some(hex_entity) = hex_map.map.get(&cursor_hex.hex) {
             let hex_structure = q_hex.get(*hex_entity).expect("valid entity from map");
-            match (hex_structure.entity, selected_structure.structure.entity) {
-                (Some(curr), Some(prev)) => {
-                    if curr != prev {
-                        dbg!("new structure");
-                        *prev_selected_structure = PrevSelectedStructure {
-                            structure: selected_structure.structure,
-                        }
-                    }
-                }
-                _ => {}
+            *selected_structure = match (hex_structure.entity, selected_structure.curr_structure) {
+                (Some(clicked_entity), Some(prev)) if clicked_entity != prev => SelectedStructure {
+                    curr_structure: Some(clicked_entity),
+                    prev_structure: Some(prev),
+                },
+                (Some(clicked_entity), None) => SelectedStructure {
+                    curr_structure: Some(clicked_entity),
+                    prev_structure: None,
+                },
+                _ => *selected_structure,
             }
-            selected_structure.structure = *hex_structure;
         }
     }
 }
@@ -159,7 +153,7 @@ fn select_spawn_structure(
 
 pub(crate) fn spawn_structure_on_click(
     mut commands: Commands,
-    mut q_hex: Query<(&HexStatus, &mut HexStructure), With<Hex>>,
+    mut q_hex: Query<(&HexFaction, &mut HexStructure), With<Hex>>,
     q_hex_map: Query<&HexMap>,
     turret_texture_atlas: Res<TurretAssets>,
     antenna_texture_atlas: Res<AntennaAssets>,
@@ -173,6 +167,7 @@ pub(crate) fn spawn_structure_on_click(
         let hex_entity = hex_map.map.get(&cursor_hex.hex).expect("valid cursor hex");
         let (_hex_status, mut hex_structure) =
             q_hex.get_mut(*hex_entity).expect("valid hex entity");
+        dbg!(hex_structure.entity);
         if hex_structure.entity.is_some() {
             return;
         }
@@ -181,6 +176,8 @@ pub(crate) fn spawn_structure_on_click(
             SpawnSelectedStructure::Turret => commands
                 .spawn(TurretBundle {
                     hex_pos: cursor_hex.hex,
+                    health: Health::from(TURRET_HEALTH),
+                    hittable: Hittable::from_hitbox(TURRET_SIZE),
                     sprite: SpriteBundle {
                         texture: turret_texture_atlas.turret.clone(),
                         transform: Transform::from_xyz(turret_v.x, turret_v.y, 2f32),
@@ -192,6 +189,7 @@ pub(crate) fn spawn_structure_on_click(
             SpawnSelectedStructure::Factory => commands
                 .spawn(FactoryBundle {
                     hex_pos: cursor_hex.hex,
+                    hittable: Hittable::from_hitbox(FACTORY_SIZE),
                     sprite: SpriteBundle {
                         texture: factory_texture_atlas.factory.clone(),
                         transform: Transform::from_xyz(turret_v.x, turret_v.y, 2f32),
@@ -203,6 +201,7 @@ pub(crate) fn spawn_structure_on_click(
             SpawnSelectedStructure::Antenna => commands
                 .spawn(AntennaBundle {
                     hex_pos: cursor_hex.hex,
+                    hittable: Hittable::from_hitbox(ANTENNA_SIZE),
                     reload_timer: ReloadTimer::from(ANTENNA_FIRE_RATE),
                     spritebundle: SpriteBundle {
                         texture: antenna_texture_atlas.antenna.clone(),

@@ -3450,6 +3450,7 @@ dependencies = [
  "derive_more",
  "itertools",
  "rand",
+ "tracing",
 ]
 
 [[package]]

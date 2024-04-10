@@ -1,8 +1,8 @@
 use crate::constants::{
-    ENEMY_SIZE, FIREFLY_HIT_ANIMATION_DURATION, PROJECTILE_DAMAGE, PROJECTILE_RANGE,
-    PROJECTILE_SIZE,
+    FIREFLY_BULLET_SIZE, FIREFLY_HIT_ANIMATION_DURATION, FIREFLY_SIZE, PROJECTILE_DAMAGE,
+    PROJECTILE_RANGE, PROJECTILE_SPEED, TURRET_BULLET_SIZE,
 };
-use crate::enemies::{DamagedTime, Health, Hit, Seeking};
+use crate::enemies::{Health, Hit, Hittable};
 use crate::game::AppState;
 use crate::hex::HexPosition;
 use crate::turrets::{ControlRay, ControlVec, RayTimer};
@@ -26,10 +26,10 @@ impl Plugin for ProjectilePlugin {
         app.add_systems(
             Update,
             (
-                detect_proj_enemy_collision,
-                despawn_projectiles,
+                projectile_collisions,
                 move_projectiles,
                 update_control_rays,
+                despawn_projectiles,
             ),
         );
     }
@@ -51,33 +51,91 @@ pub(crate) struct FireflyProjectileAssets {
     pub(crate) projectile: Handle<Image>,
 }
 
-#[derive(Component, Default)]
-pub(crate) struct Projectile;
+#[derive(Component)]
+pub(crate) struct Projectile {
+    kind: ProjectileType,
+    origin: Vec2,
+    velocity: Vec2,
+}
 
-#[derive(Component, Default)]
-pub(crate) struct FireflyProjectile;
+#[derive(Default)]
+pub(crate) enum ProjectileType {
+    #[default]
+    TurretBullet,
+    FireflyBullet,
+}
 
-#[derive(Bundle, Default)]
+const TURRET_BULLET_DAMAGE: f32 = 25f32;
+const FIREFLY_BULLET_DAMAGE: f32 = 15f32;
+
+impl Projectile {
+    pub(crate) fn new_turret_bullet(origin: Vec2, velocity: Vec2) -> Projectile {
+        Projectile {
+            kind: ProjectileType::TurretBullet,
+            origin,
+            velocity,
+        }
+    }
+
+    pub(crate) fn new_firefly_bullet(origin: Vec2, velocity: Vec2) -> Projectile {
+        Projectile {
+            kind: ProjectileType::FireflyBullet,
+            origin,
+            velocity,
+        }
+    }
+
+    fn damage(&self) -> f32 {
+        match self.kind {
+            ProjectileType::TurretBullet => TURRET_BULLET_DAMAGE,
+            ProjectileType::FireflyBullet => FIREFLY_BULLET_DAMAGE,
+        }
+    }
+
+    fn size(&self) -> Vec2 {
+        match self.kind {
+            ProjectileType::TurretBullet => TURRET_BULLET_SIZE,
+            ProjectileType::FireflyBullet => FIREFLY_BULLET_SIZE,
+        }
+    }
+}
+
+#[derive(Bundle)]
 pub(crate) struct FireflyProjectileBundle {
-    pub(crate) firefly_projectile: FireflyProjectile,
     pub(crate) projectile: Projectile,
     pub(crate) velocity: Velocity,
-    pub(crate) distance: Distance,
     pub(crate) sprite: SpriteBundle,
     pub(crate) hit: Hit,
 }
 
-#[derive(Component, Default)]
-pub(crate) struct TurretProjectile;
+impl Default for FireflyProjectileBundle {
+    fn default() -> Self {
+        FireflyProjectileBundle {
+            projectile: Projectile::new_firefly_bullet(Vec2::ZERO, Vec2::ZERO),
+            velocity: Velocity::default(),
+            sprite: SpriteBundle::default(),
+            hit: Hit::default(),
+        }
+    }
+}
 
-#[derive(Bundle, Default)]
+#[derive(Bundle)]
 pub(crate) struct TurretProjectileBundle {
     pub(crate) projectile: Projectile,
-    pub(crate) turret_projectile: TurretProjectile,
     pub(crate) velocity: Velocity,
-    pub(crate) distance: Distance,
     pub(crate) sprite: SpriteBundle,
     pub(crate) hit: Hit,
+}
+
+impl Default for TurretProjectileBundle {
+    fn default() -> Self {
+        TurretProjectileBundle {
+            projectile: Projectile::new_turret_bullet(Vec2::ZERO, Vec2::ZERO),
+            velocity: Velocity::default(),
+            sprite: SpriteBundle::default(),
+            hit: Hit::default(),
+        }
+    }
 }
 
 #[derive(Component, Default)]
@@ -115,51 +173,35 @@ impl From<&Velocity> for Vec2 {
     }
 }
 
-#[derive(Component, Default, Add)]
-pub(crate) struct Distance {
-    pub(crate) d: f32,
-}
-
-impl From<f32> for Distance {
-    fn from(value: f32) -> Self {
-        Distance { d: value }
-    }
-}
-
-fn detect_proj_enemy_collision(
-    mut q_enemies: Query<
-        (&Transform, &mut DamagedTime, &mut Health),
-        (With<Seeking>, Without<TurretProjectile>),
-    >,
-    mut q_projectiles: Query<(&Transform, &mut Hit), (With<TurretProjectile>, Without<Seeking>)>,
+fn projectile_collisions(
+    mut q_hittables: Query<(&Transform, &mut Health, &mut Hittable), Without<Projectile>>,
+    mut q_projectiles: Query<(&Transform, &mut Hit, &Projectile), With<Projectile>>,
 ) {
-    for (proj, mut proj_hit) in &mut q_projectiles {
-        for (enemy, mut damage_dur, mut enemy_health) in &mut q_enemies {
-            let collision =
-                Aabb2d::new(enemy.translation.truncate(), ENEMY_SIZE / 2f32).intersects(
-                    &Aabb2d::new(proj.translation.truncate(), PROJECTILE_SIZE / 2f32),
-                );
+    for (proj_transform, mut proj_hit, projectile) in &mut q_projectiles {
+        for (target_transform, mut target_health, mut hittable) in &mut q_hittables {
+            let collision = Aabb2d::new(
+                target_transform.translation.truncate(),
+                hittable.hitbox / 2f32,
+            )
+            .intersects(&Aabb2d::new(
+                proj_transform.translation.truncate(),
+                projectile.size() / 2f32,
+            ));
             if collision {
                 proj_hit.has_hit = true;
-                enemy_health.hp -= PROJECTILE_DAMAGE;
-                damage_dur.time = Some(Timer::from_seconds(
-                    FIREFLY_HIT_ANIMATION_DURATION,
-                    TimerMode::Once,
-                ));
+                target_health.hp -= projectile.damage();
+                hittable.hit = true;
                 break;
             }
         }
     }
 }
 
-fn move_projectiles(
-    mut q_projectiles: Query<(&mut Transform, &mut Distance, &Velocity), With<Projectile>>,
-    time: Res<Time>,
-) {
-    for (mut trans, mut dist, vel) in &mut q_projectiles {
-        let v = Vec3::from(vel) * time.delta_seconds();
-        trans.translation += v;
-        dist.d += v.length();
+fn move_projectiles(mut q_projectiles: Query<(&mut Transform, &Projectile)>, time: Res<Time>) {
+    for (mut trans, proj) in &mut q_projectiles {
+        let new_translation =
+            (proj.velocity * time.delta_seconds()).extend(0f32) + trans.translation;
+        trans.translation = new_translation;
     }
 }
 
@@ -184,11 +226,51 @@ fn update_control_rays(
 
 fn despawn_projectiles(
     mut commands: Commands,
-    q_projectiles: Query<(Entity, &Distance, &Hit), With<TurretProjectile>>,
+    q_projectiles: Query<(Entity, &Transform, &Projectile, &Hit)>,
 ) {
-    for (entity, dist, hit) in &q_projectiles {
-        if dist.d > PROJECTILE_RANGE || hit.has_hit {
+    for (entity, trans, proj, hit) in &q_projectiles {
+        let distance_traveled = trans.translation.truncate().distance(proj.origin);
+        if distance_traveled > PROJECTILE_RANGE || hit.has_hit {
             commands.entity(entity).despawn_recursive();
+        }
+    }
+}
+
+pub(crate) fn spawn_projectile(
+    commands: &mut Commands,
+    projectile_type: ProjectileType,
+    velocity: Vec2,
+    texture: Handle<Image>,
+    transform: Transform,
+) {
+    match projectile_type {
+        ProjectileType::TurretBullet => {
+            commands.spawn(TurretProjectileBundle {
+                projectile: Projectile::new_turret_bullet(
+                    transform.translation.truncate(),
+                    velocity,
+                ),
+                sprite: SpriteBundle {
+                    texture: texture.clone(),
+                    transform,
+                    ..default()
+                },
+                ..default()
+            });
+        }
+        ProjectileType::FireflyBullet => {
+            commands.spawn(FireflyProjectileBundle {
+                projectile: Projectile::new_firefly_bullet(
+                    transform.translation.truncate(),
+                    velocity,
+                ),
+                sprite: SpriteBundle {
+                    texture,
+                    transform,
+                    ..default()
+                },
+                ..default()
+            });
         }
     }
 }
