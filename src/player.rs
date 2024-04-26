@@ -59,7 +59,6 @@ fn player_control_hex(
     mut q_player_hex: Query<&mut HexControl, (With<Hex>, Without<Player>)>,
     q_hex_map: Query<&HexMap>,
 ) {
-    // panics no entities
     let (player_control, player_pos) = q_player_hex_control.single();
     let hex_map = q_hex_map.single();
     let hex_id = hex_map.map.get(player_pos);
@@ -70,7 +69,7 @@ fn player_control_hex(
     }
 }
 
-fn move_player(
+pub(crate) fn move_player(
     keyboard_input: Res<ButtonInput<KeyCode>>,
     mut player_transform_query: Query<&mut Transform, With<Player>>,
     mut player_hex_query: Query<&mut HexPosition, With<Player>>,

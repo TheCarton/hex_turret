@@ -8,6 +8,12 @@ pub const BLUE_CONTROL_TARGET: f32 = 0f32;
 pub const NEUTRAL_CONTROL_TARGET: f32 = 100f32;
 pub const MAX_CONTROL_VALUE: f32 = 500f32;
 
+pub const TURRET_IMAGE_PATH: &str = "turret.png";
+pub const ANTENNA_IMAGE_PATH: &str = "antenna.png";
+pub const FACTORY_IMAGE_PATH: &str = "firefly_factory_spritesheet.png";
+pub const FIREFLY_IMAGE_PATH: &str = "firefly_spritesheet.png";
+pub const NO_STRUCTURE_IMAGE_PATH: &str = "no_structure_icon.png";
+
 pub const PLAYER_SPEED: f32 = 500.0;
 pub const PLAYER_SIZE: Vec2 = Vec2::new(28f32, 16f32);
 

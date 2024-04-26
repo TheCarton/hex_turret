@@ -1,20 +1,15 @@
 Soon:
 
-add health to everything
 
-make fireflies shoot at you
-
+the control ray need to be reworked.
+the player control hex doesn't make sense
 add unit that creates small hex control field
 
-make factory spawn based on hex control
-
-make friendly fireflies
+make minimum interesting map
 
 update hexmap to be not dumb
 
 add a character that is less terrible
-
-add a gui to show selected units to place
 
 add a pause game
 

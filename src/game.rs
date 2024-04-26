@@ -16,6 +16,13 @@ pub(crate) enum AppState {
     InGame,
 }
 
+#[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
+pub(crate) enum PauseState {
+    Paused,
+    #[default]
+    Running,
+}
+
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct EnterGameSet;
 
@@ -31,6 +38,7 @@ impl Plugin for GamePlugin {
             .add_loading_state(
                 LoadingState::new(AppState::AssetLoading).continue_to_state(AppState::InGame),
             )
+            .init_state::<PauseState>()
             .configure_sets(OnEnter(AppState::InGame), EnterGameSet)
             .configure_sets(
                 FixedUpdate,

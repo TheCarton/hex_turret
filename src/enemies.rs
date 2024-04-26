@@ -1,4 +1,3 @@
-use bevy::log::tracing_subscriber::field::debug;
 use bevy::math::bounding::Aabb2d;
 use bevy::math::bounding::IntersectsVolume;
 use bevy::prelude::*;
@@ -19,7 +18,6 @@ use crate::projectiles::FireflyProjectileAssets;
 use crate::projectiles::ProjectileType;
 use crate::turrets::BuildTimer;
 use crate::turrets::FactoryEnergy;
-use crate::turrets::FactorySpawnConfig;
 use crate::turrets::FireflyFactory;
 use crate::turrets::ReloadTimer;
 use crate::{
@@ -31,7 +29,6 @@ pub(crate) struct EnemiesPlugin;
 
 impl Plugin for EnemiesPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, setup_factory_spawning);
         app.configure_loading_state(
             LoadingStateConfig::new(AppState::AssetLoading).load_collection::<FireflyAssets>(),
         );
@@ -64,12 +61,6 @@ impl Hittable {
     pub(crate) fn from_hitbox(hitbox: Vec2) -> Hittable {
         Hittable { hitbox, hit: false }
     }
-}
-
-pub(crate) fn setup_factory_spawning(mut commands: Commands) {
-    commands.insert_resource(FactorySpawnConfig {
-        timer: Timer::from_seconds(3f32, TimerMode::Repeating),
-    })
 }
 
 #[derive(Component, Default, Debug)]
@@ -290,8 +281,8 @@ fn fire_firefly_projectiles(
     for (firefly_transform, target, mut reload_timer) in q_fireflies.iter_mut() {
         reload_timer.timer.tick(time.delta());
         if reload_timer.timer.finished() {
-            if let Some(target_entity) = target.entity {
-                let target_transform = q_target.get(target_entity).expect("valid entity");
+            let maybe_target_transform = target.entity.map(|e| q_target.get(e).ok()).flatten();
+            if let Some(target_transform) = maybe_target_transform {
                 if target_transform
                     .translation
                     .distance(firefly_transform.translation)

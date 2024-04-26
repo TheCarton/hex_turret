@@ -16,10 +16,10 @@ use crate::game::AppState;
 use crate::hex::cube_linedraw;
 use crate::hex::Hex;
 use crate::hex::HexControl;
+use crate::hex::MIN_HEX_CONTROL;
 use crate::projectiles::spawn_projectile;
 use crate::projectiles::ProjectileType;
 use crate::projectiles::TurretProjectileAssets;
-use crate::projectiles::Velocity;
 use crate::{
     constants::{TURRET_RANGE, TURRET_RELOAD_SECONDS},
     enemies::Seeking,
@@ -43,6 +43,8 @@ impl Plugin for TurretPlugin {
                 aim_turrets,
                 fire_turrets,
                 fire_control_ray,
+                decay_control_ray,
+                despawn_decayed_control_rays,
                 rotate_antennae,
                 update_factory_energy,
                 change_selected_structure_color.after(spawn_structure_on_click),
@@ -67,21 +69,28 @@ impl Default for AimVec {
 pub(crate) struct Antenna;
 
 #[derive(Component, Default)]
-pub(crate) struct Structure;
+pub(crate) enum Structure {
+    #[default]
+    Turret,
+    Factory,
+    Antenna,
+}
+
+impl Structure {
+    pub(crate) fn string(&self) -> String {
+        match self {
+            Structure::Turret => "Turret",
+            Structure::Factory => "Factory",
+            Structure::Antenna => "Antenna",
+        }
+        .to_string()
+    }
+}
 
 #[derive(Component, Default, Debug)]
 pub(crate) struct ControlVec {
     pub(crate) hexes: Vec<HexPosition>,
     pub(crate) control: HexControl,
-}
-
-impl ControlVec {
-    fn line(start: HexPosition, end: HexPosition, control: HexControl) -> ControlVec {
-        ControlVec {
-            hexes: cube_linedraw(start, end),
-            control,
-        }
-    }
 }
 
 #[derive(Component, Default)]
@@ -100,10 +109,10 @@ pub(crate) struct ControlRayBundle {
     timer: RayTimer,
 }
 
-#[derive(Bundle, Default)]
+#[derive(Bundle)]
 pub(crate) struct AntennaBundle {
     pub(crate) antenna: Antenna,
-
+    pub(crate) icon: StructureIcon,
     pub(crate) structure: Structure,
     pub(crate) health: Health,
     pub(crate) faction: HexFaction,
@@ -114,6 +123,25 @@ pub(crate) struct AntennaBundle {
     pub(crate) animation_indices: AnimationIndices,
     pub(crate) animation_timer: AnimationTimer,
     pub(crate) reload_timer: ReloadTimer,
+}
+
+impl Default for AntennaBundle {
+    fn default() -> Self {
+        AntennaBundle {
+            icon: StructureIcon::FactoryIcon,
+            structure: Structure::Antenna,
+            hittable: Hittable::default(),
+            faction: HexFaction::Neutral,
+            health: Health::default(),
+            hex_pos: HexPosition::default(),
+            animation_indices: AnimationIndices::default(),
+            animation_timer: AnimationTimer::default(),
+            antenna: Antenna,
+            spritebundle: SpriteBundle::default(),
+            target_point: AimVec::default(),
+            reload_timer: ReloadTimer::default(),
+        }
+    }
 }
 
 fn fire_control_ray(
@@ -146,53 +174,65 @@ fn fire_control_ray(
     }
 }
 
+fn despawn_decayed_control_rays(
+    q_rays: Query<(Entity, &ControlVec), With<ControlRay>>,
+    mut commands: Commands,
+) {
+    for (control_entity, control_vec) in q_rays.iter() {
+        if control_vec.control == MIN_HEX_CONTROL {
+            commands.entity(control_entity).despawn();
+        }
+    }
+}
+
+pub(crate) const CONTROL_RAY_DECAY: f32 = 5f32;
+fn decay_control_ray(mut q_rays: Query<&mut ControlVec, With<ControlRay>>) {
+    for mut ray in q_rays.iter_mut() {
+        ray.control -= CONTROL_RAY_DECAY;
+    }
+}
+
 #[derive(Component, Default)]
 pub(crate) struct FireflyFactory;
-
-#[derive(Component, Default)]
-pub(crate) struct PrevFactoryState {
-    state: FactoryAnimationState,
-}
-
-#[derive(Component, Default)]
-pub(crate) struct CurrentFactoryState {
-    state: FactoryAnimationState,
-}
-
-#[derive(Default)]
-pub(crate) enum FactoryAnimationState {
-    #[default]
-    Idle,
-    Opening,
-    Open,
-    Malfunctioning,
-}
 
 #[derive(Component, Default)]
 pub(crate) struct FactoryEnergy {
     pub(crate) energy: HexControl,
 }
 
-#[derive(Bundle, Default)]
+#[derive(Bundle)]
 pub(crate) struct FactoryBundle {
     pub(crate) fireflyfactory: FireflyFactory,
+    pub(crate) icon: StructureIcon,
     pub(crate) structure: Structure,
     pub(crate) hittable: Hittable,
     pub(crate) faction: HexFaction,
     pub(crate) factory_energy: FactoryEnergy,
     pub(crate) health: Health,
     pub(crate) hex_pos: HexPosition,
-    pub(crate) prev_animation_state: PrevFactoryState,
-    pub(crate) current_animation_state: CurrentFactoryState,
     pub(crate) animation_indices: AnimationIndices,
     pub(crate) animation_timer: AnimationTimer,
     pub(crate) sprite: SpriteBundle,
     pub(crate) build_timer: BuildTimer,
 }
 
-#[derive(Resource)]
-pub(crate) struct FactorySpawnConfig {
-    pub(crate) timer: Timer,
+impl Default for FactoryBundle {
+    fn default() -> Self {
+        FactoryBundle {
+            fireflyfactory: FireflyFactory::default(),
+            icon: StructureIcon::FactoryIcon,
+            structure: Structure::Factory,
+            hittable: Hittable::default(),
+            faction: HexFaction::Neutral,
+            factory_energy: FactoryEnergy::default(),
+            health: Health::default(),
+            hex_pos: HexPosition::default(),
+            animation_indices: AnimationIndices::default(),
+            animation_timer: AnimationTimer::default(),
+            sprite: SpriteBundle::default(),
+            build_timer: BuildTimer::default(),
+        }
+    }
 }
 
 #[derive(Component)]
@@ -226,9 +266,19 @@ fn update_factory_energy(
 #[derive(Component, Default)]
 pub(crate) struct Turret;
 
-#[derive(Bundle, Default)]
+#[derive(Component, Default)]
+pub(crate) enum StructureIcon {
+    #[default]
+    TurretIcon,
+    AntennaIcon,
+    FactoryIcon,
+    NoStructureIcon,
+}
+
+#[derive(Bundle)]
 pub(crate) struct TurretBundle {
     pub(crate) turret: Turret,
+    pub(crate) icon: StructureIcon,
     pub(crate) structure: Structure,
     pub(crate) health: Health,
     pub(crate) hittable: Hittable,
@@ -241,6 +291,24 @@ pub(crate) struct TurretBundle {
     pub(crate) animation_timer: AnimationTimer,
 }
 
+impl Default for TurretBundle {
+    fn default() -> Self {
+        TurretBundle {
+            turret: Turret::default(),
+            icon: StructureIcon::TurretIcon,
+            structure: Structure::default(),
+            hittable: Hittable::default(),
+            faction: HexFaction::Neutral,
+            health: Health::default(),
+            hex_pos: HexPosition::default(),
+            animation_indices: AnimationIndices::default(),
+            animation_timer: AnimationTimer::default(),
+            sprite: SpriteBundle::default(),
+            reload_timer: ReloadTimer::default(),
+            aim: AimVec::default(),
+        }
+    }
+}
 #[derive(AssetCollection, Resource)]
 pub(crate) struct FactoryAssets {
     #[asset(texture_atlas_layout(tile_size_x = 48., tile_size_y = 48., columns = 1, rows = 1))]

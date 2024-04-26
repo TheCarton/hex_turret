@@ -1,5 +1,6 @@
 use bevy::prelude::*;
 use game::GamePlugin;
+use gui::GuiPlugin;
 
 mod animation;
 mod camera;
@@ -8,9 +9,11 @@ mod constants;
 mod controls;
 mod enemies;
 mod game;
+mod gui;
 mod hex;
 mod player;
 mod projectiles;
+mod tools;
 mod turrets;
 
 fn main() {
@@ -23,5 +26,6 @@ fn main() {
             ..default()
         }))
         .add_plugins(GamePlugin)
+        .add_plugins(GuiPlugin)
         .run()
 }

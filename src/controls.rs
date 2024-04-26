@@ -1,11 +1,11 @@
-use bevy::{prelude::*, window::PrimaryWindow};
+use bevy::{ecs::query, prelude::*, window::PrimaryWindow};
 
 use crate::{
     camera::MainCamera,
     constants::{ANTENNA_FIRE_RATE, ANTENNA_SIZE, FACTORY_SIZE, TURRET_HEALTH, TURRET_SIZE},
     enemies::{Health, Hittable},
-    game::AppState,
-    hex::{Hex, HexFaction, HexMap, HexPosition, HexStructure},
+    game::{AppState, PauseState},
+    hex::{update_hexes, Hex, HexFaction, HexMap, HexPosition, HexStructure},
     turrets::{
         AimVec, Antenna, AntennaAssets, AntennaBundle, FactoryAssets, FactoryBundle, ReloadTimer,
         TurretAssets, TurretBundle,
@@ -20,11 +20,12 @@ impl Plugin for ControlPlugin {
             .init_resource::<CursorHexPosition>()
             .init_resource::<SpawnSelectedStructure>()
             .init_resource::<SelectedStructure>()
+            .add_systems(OnEnter(PauseState::Running), flatten_selected_structures)
             .add_systems(
                 Update,
                 (
                     cursor_system,
-                    spawn_structure_on_click,
+                    spawn_structure_on_click.after(update_hexes),
                     update_antenna_target,
                     select_spawn_structure,
                     select_structure,
@@ -50,12 +51,29 @@ pub(crate) struct SelectedStructure {
     pub(crate) prev_structure: Option<Entity>,
 }
 
+impl SelectedStructure {
+    fn to_mut_array(&mut self) -> [&mut Option<Entity>; 2] {
+        [&mut self.curr_structure, &mut self.prev_structure]
+    }
+}
+
 #[derive(Resource, Default)]
 pub(crate) enum SpawnSelectedStructure {
     #[default]
     Turret,
     Factory,
     Antenna,
+}
+
+impl SpawnSelectedStructure {
+    pub(crate) fn string(&self) -> String {
+        match self {
+            SpawnSelectedStructure::Turret => "Turret",
+            SpawnSelectedStructure::Factory => "Factory",
+            SpawnSelectedStructure::Antenna => "Antenna",
+        }
+        .to_string()
+    }
 }
 
 fn cursor_system(
@@ -214,4 +232,20 @@ pub(crate) fn spawn_structure_on_click(
         };
         *hex_structure = HexStructure::from_id(entity_id);
     }
+}
+
+fn flatten_selected_structures(
+    mut selected_structure: ResMut<SelectedStructure>,
+    query: Query<Entity>,
+) {
+    selected_structure
+        .to_mut_array()
+        .into_iter()
+        .for_each(|sel| {
+            if let Some(entity) = sel {
+                if query.get(*entity).is_err() {
+                    *sel = None;
+                }
+            }
+        });
 }

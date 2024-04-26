@@ -4,7 +4,7 @@ use itertools::Itertools;
 use std::{
     cmp::Ordering,
     collections::HashMap,
-    ops::{Add, Index, IndexMut, Mul},
+    ops::{Add, Index, IndexMut, Mul, Sub, SubAssign},
 };
 
 use rand::Rng;
@@ -12,10 +12,10 @@ use rand::Rng;
 use crate::{
     colors,
     constants::{
-        BLUE_CONTROL_TARGET, E, HEX_DIRECTIONS, HEX_SIZE, MAX_CONTROL_VALUE, NE, NW,
+        BLUE_CONTROL_TARGET, CONTROL_DECAY, E, HEX_DIRECTIONS, HEX_SIZE, MAX_CONTROL_VALUE, NE, NW,
         RED_CONTROL_TARGET, SE, SW, W,
     },
-    turrets::{ControlRay, ControlVec},
+    turrets::{ControlRay, ControlVec, CONTROL_RAY_DECAY},
 };
 
 pub struct HexPlugin;
@@ -154,7 +154,7 @@ pub(crate) fn populate_map(
     }
 }
 
-fn update_hexes(
+pub(crate) fn update_hexes(
     mut hex_query: Query<(&HexControl, &mut HexFaction, &mut HexStructure), With<Hex>>,
     q_structure: Query<Entity>,
 ) {
@@ -248,11 +248,67 @@ impl HexFaction {
     }
 }
 
+pub(crate) const MIN_HEX_CONTROL: HexControl = HexControl {
+    red: 0f32,
+    blue: 0f32,
+    neutral: 0f32,
+};
+
+pub(crate) const MAX_HEX_CONTROL: HexControl = HexControl {
+    red: 500f32,
+    blue: 500f32,
+    neutral: 500f32,
+};
 #[derive(Component, Debug, Copy, Clone)]
 pub(crate) struct HexControl {
     pub(crate) red: f32,
     pub(crate) blue: f32,
     pub(crate) neutral: f32,
+}
+
+impl HexControl {
+    fn into_iter(&self) -> std::array::IntoIter<f32, 3> {
+        [self.red, self.blue, self.neutral].into_iter()
+    }
+    fn into_iter_mut(&mut self) -> std::array::IntoIter<&mut f32, 3> {
+        [&mut self.red, &mut self.blue, &mut self.neutral].into_iter()
+    }
+}
+
+impl Sub<f32> for HexControl {
+    type Output = HexControl;
+
+    fn sub(self, rhs: f32) -> Self::Output {
+        HexControl {
+            red: if (self.red - rhs) > MIN_HEX_CONTROL.red {
+                self.red - rhs
+            } else {
+                MIN_HEX_CONTROL.red
+            },
+            blue: if (self.blue - rhs) > MIN_HEX_CONTROL.blue {
+                self.blue - rhs
+            } else {
+                MIN_HEX_CONTROL.blue
+            },
+            neutral: if (self.neutral - rhs) > MIN_HEX_CONTROL.neutral {
+                self.neutral - rhs
+            } else {
+                MIN_HEX_CONTROL.neutral
+            },
+        }
+    }
+}
+
+impl SubAssign<f32> for HexControl {
+    fn sub_assign(&mut self, rhs: f32) {
+        for (faction, min) in self.into_iter_mut().zip(MIN_HEX_CONTROL.into_iter()) {
+            *faction = if *faction - rhs > min {
+                *faction - rhs
+            } else {
+                min
+            };
+        }
+    }
 }
 
 impl Default for HexControl {
@@ -286,7 +342,7 @@ impl PartialOrd for HexControl {
 
 impl PartialEq for HexControl {
     fn eq(&self, other: &Self) -> bool {
-        (self.red + self.blue + self.neutral) == (other.red + other.blue + other.neutral)
+        self.into_iter().zip(other.into_iter()).all(|(x, y)| x == y)
     }
 }
 
@@ -407,6 +463,10 @@ impl HexPosition {
             q: vec3.x as i8,
             r: vec3.y as i8,
         }
+    }
+
+    pub(crate) fn gui_label(&self) -> String {
+        format!("q: {}, r: {}, s: {}", self.q, self.r, self.s())
     }
 
     pub(crate) fn neighbors(&self) -> [HexPosition; 6] {
