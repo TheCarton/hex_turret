@@ -433,12 +433,17 @@ fn fire_turrets(
     }
 }
 
-fn rotate_antennae(mut q_antennae: Query<(&mut Transform, &HexDirection), With<Antenna>>) {
+fn rotate_antennae(
+    mut q_antennae: Query<(&mut Transform, &HexDirection), (With<Antenna>, Changed<HexDirection>)>,
+) {
     for (mut trans, hex_direction) in q_antennae.iter_mut() {
         let antenna_hex = HexPosition::from_pixel(trans.translation.truncate());
         let aim_hex = antenna_hex + hex_direction.to_hex();
-        let rotate_to_aim = Quat::from_rotation_arc(Vec3::Y, aim_hex.pixel_coords().extend(0f32));
-        trans.rotation = rotate_to_aim;
+        let maybe_aim_vec = (aim_hex.pixel_coords() - trans.translation.truncate()).try_normalize();
+        if let Some(aim_vec) = maybe_aim_vec {
+            let rotate_to_aim = Quat::from_rotation_arc(Vec3::Y, aim_vec.extend(0f32));
+            trans.rotation = rotate_to_aim;
+        }
     }
 }
 
