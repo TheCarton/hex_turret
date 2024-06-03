@@ -5,7 +5,10 @@ use crate::{
     constants::{ANTENNA_FIRE_RATE, ANTENNA_SIZE, FACTORY_SIZE, TURRET_HEALTH, TURRET_SIZE},
     enemies::{Health, Hittable},
     game::{AppState, PauseState},
-    hex::{update_hexes, Hex, HexFaction, HexMap, HexPosition, HexStructure},
+    hex::{
+        hex_direction, update_hexes, Hex, HexDirection, HexFaction, HexMap, HexPosition,
+        HexStructure,
+    },
     turrets::{
         AimVec, Antenna, AntennaAssets, AntennaBundle, FactoryAssets, FactoryBundle, ReloadTimer,
         TurretAssets, TurretBundle,
@@ -43,6 +46,12 @@ pub(crate) struct CursorWorldCoords {
 #[derive(Resource, Default)]
 pub(crate) struct CursorHexPosition {
     pub(crate) hex: HexPosition,
+}
+
+impl CursorHexPosition {
+    pub(crate) fn gui_string(&self) -> String {
+        format!("q: {}, r: {}", self.hex.q, self.hex.r)
+    }
 }
 
 #[derive(Resource, Default, Copy, Clone)]
@@ -102,32 +111,23 @@ fn cursor_system(
 }
 
 fn update_antenna_target(
-    q_hex_map: Query<&HexMap>,
-    mut q_antenna: Query<&mut AimVec, With<Antenna>>,
+    mut q_antenna: Query<(&mut HexDirection, &Transform), With<Antenna>>,
     cursor_coords: Res<CursorWorldCoords>,
     selected_structure: Res<SelectedStructure>,
     buttons: Res<ButtonInput<MouseButton>>,
 ) {
-    match (
-        selected_structure.curr_structure,
-        buttons.get_pressed().last(),
-    ) {
-        // TODO: Add a target component to the antenna bundle and use that to calculate the aim vector and hex aim point.
-        (Some(structure_entity), Some(MouseButton::Right)) => {
-            let hex_map = q_hex_map.single();
-            if let Ok(mut antenna_aim_vec) = q_antenna.get_mut(structure_entity) {
-                if hex_map
-                    .map
-                    .get(&HexPosition::from_pixel(cursor_coords.pos))
-                    .is_some()
-                {
-                    *antenna_aim_vec = AimVec {
-                        v: Some(cursor_coords.pos),
-                    };
-                }
-            }
-        }
-        _ => {}
+    if buttons.just_pressed(MouseButton::Right) {
+        selected_structure
+            .curr_structure
+            .map(|e| q_antenna.get_mut(e).ok())
+            .flatten()
+            .map(|(mut face, trans)| {
+                let new_face = hex_direction(
+                    HexPosition::from_pixel(trans.translation.truncate()),
+                    HexPosition::from_pixel(cursor_coords.pos),
+                );
+                *face = new_face;
+            });
     }
 }
 

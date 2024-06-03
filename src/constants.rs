@@ -5,7 +5,7 @@ pub const HEX_SIZE: f32 = 32.0;
 pub const CONTROL_DECAY: f32 = 2.5f32;
 pub const RED_CONTROL_TARGET: f32 = 0f32;
 pub const BLUE_CONTROL_TARGET: f32 = 0f32;
-pub const NEUTRAL_CONTROL_TARGET: f32 = 100f32;
+pub const NEUTRAL_CONTROL_TARGET: f32 = 0f32;
 pub const MAX_CONTROL_VALUE: f32 = 500f32;
 
 pub const TURRET_IMAGE_PATH: &str = "turret.png";
@@ -50,10 +50,10 @@ pub const FIREFLY_SIZE: Vec2 = Vec2::new(42f32, 38f32);
 pub const FIREFLY_HIT_ANIMATION_DURATION: f32 = 0.5f32;
 pub const FIREFLY_RANGE: f32 = HEX_SIZE * 1.5;
 
-pub const NE: HexPosition = HexPosition { q: 1, r: -1 };
+pub const NE: HexPosition = HexPosition { q: 0, r: 1 };
 pub const E: HexPosition = HexPosition { q: 1, r: 0 };
-pub const SE: HexPosition = HexPosition { q: 0, r: 1 };
-pub const SW: HexPosition = HexPosition { q: -1, r: 1 };
+pub const SE: HexPosition = HexPosition { q: 1, r: -1 };
+pub const SW: HexPosition = HexPosition { q: 0, r: -1 };
 pub const W: HexPosition = HexPosition { q: -1, r: 0 };
-pub const NW: HexPosition = HexPosition { q: 0, r: -1 };
+pub const NW: HexPosition = HexPosition { q: -1, r: 1 };
 pub const HEX_DIRECTIONS: [HexPosition; 6] = [NE, E, SE, SW, W, NW];

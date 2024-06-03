@@ -1,10 +1,10 @@
-use bevy::prelude::*;
+use bevy::{core_pipeline::tonemapping, prelude::*, reflect::Array};
 use derive_more::{Add, Sub};
 use itertools::Itertools;
 use std::{
     cmp::Ordering,
     collections::HashMap,
-    ops::{Add, Index, IndexMut, Mul, Sub, SubAssign},
+    ops::{Add, AddAssign, Index, IndexMut, Mul, Sub, SubAssign},
 };
 
 use rand::Rng;
@@ -15,7 +15,7 @@ use crate::{
         BLUE_CONTROL_TARGET, CONTROL_DECAY, E, HEX_DIRECTIONS, HEX_SIZE, MAX_CONTROL_VALUE, NE, NW,
         RED_CONTROL_TARGET, SE, SW, W,
     },
-    turrets::{ControlRay, ControlVec, CONTROL_RAY_DECAY},
+    turrets::{ControlRay, ControlVec},
 };
 
 pub struct HexPlugin;
@@ -35,7 +35,7 @@ impl Plugin for HexPlugin {
     }
 }
 
-#[derive(Component, Default)]
+#[derive(Component, Default, Debug)]
 pub(crate) enum HexDirection {
     NE,
     #[default]
@@ -67,38 +67,39 @@ pub(crate) fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) 
         (-size..size).for_each(|r| acc.push(HexPosition::from_qr(q, r)));
         acc
     });
-    commands
-        .spawn((
-            SpriteBundle {
-                sprite: Sprite {
-                    color: colors::BOARD,
-                    custom_size: Some(Vec2::new(physical_map_size, physical_map_size)),
+    for h in &hex_positions {
+        dbg!(h);
+        dbg!(h.pixel_coords());
+    }
+    commands.spawn((
+        SpriteBundle {
+            sprite: Sprite {
+                color: colors::BOARD,
+                custom_size: Some(Vec2::new(physical_map_size, physical_map_size)),
+                ..default()
+            },
+            ..default()
+        },
+        HexMap { size, map },
+    ));
+    hex_positions.iter().for_each({
+        |hex_pos| {
+            commands.spawn(HexBundle {
+                pos: *hex_pos,
+                status: HexFaction::Neutral,
+                sprite: SpriteBundle {
+                    texture: asset_server.load("blue_hex.png"),
+                    transform: Transform::from_xyz(
+                        hex_pos.pixel_coords().x,
+                        hex_pos.pixel_coords().y,
+                        0.0,
+                    ),
                     ..default()
                 },
                 ..default()
-            },
-            HexMap { size, map },
-        ))
-        .with_children(|builder| {
-            hex_positions.iter().for_each({
-                |hex_pos| {
-                    builder.spawn(HexBundle {
-                        pos: *hex_pos,
-                        status: HexFaction::Neutral,
-                        sprite: SpriteBundle {
-                            texture: asset_server.load("blue_hex.png"),
-                            transform: Transform::from_xyz(
-                                hex_pos.pixel_coords().x,
-                                hex_pos.pixel_coords().y,
-                                1.0,
-                            ),
-                            ..default()
-                        },
-                        ..default()
-                    });
-                }
             });
-        });
+        }
+    });
 }
 
 fn decay_hex_control(mut hex_query: Query<&mut HexControl, With<Hex>>) {
@@ -187,11 +188,14 @@ fn update_hex_control_from_control_rays(
 fn change_hex_color(mut hex_query: Query<(&HexControl, &mut Sprite), With<Hex>>) {
     for (control, mut sprite) in hex_query.iter_mut() {
         let base = control.red + control.blue + control.neutral;
-        sprite.color.set_r(control.red / base);
-        sprite.color.set_b(control.blue / base);
-        sprite.color.set_g(control.neutral / base);
+        if base > 0f32 {
+            sprite.color.set_r(control.red / base);
+            sprite.color.set_b(control.blue / base);
+            sprite.color.set_g(control.neutral / base);
+        }
     }
 }
+
 pub(crate) fn random_hex(hex_map: &HexMap) -> HexPosition {
     let mut rng = rand::thread_rng();
     let q = rng.gen_range(-hex_map.size..hex_map.size);
@@ -299,22 +303,18 @@ impl Sub<f32> for HexControl {
     }
 }
 
-impl SubAssign<f32> for HexControl {
-    fn sub_assign(&mut self, rhs: f32) {
-        for (faction, min) in self.into_iter_mut().zip(MIN_HEX_CONTROL.into_iter()) {
-            *faction = if *faction - rhs > min {
-                *faction - rhs
-            } else {
-                min
-            };
-        }
+impl AddAssign<HexControl> for HexControl {
+    fn add_assign(&mut self, rhs: HexControl) {
+        self.red += rhs.red;
+        self.blue += rhs.blue;
+        self.neutral += rhs.neutral;
     }
 }
 
 impl Default for HexControl {
     fn default() -> Self {
         HexControl {
-            red: 100f32,
+            red: 0f32,
             blue: 0f32,
             neutral: 0f32,
         }
@@ -438,7 +438,7 @@ impl HexPosition {
 impl HexPosition {
     pub(crate) fn pixel_coords(&self) -> Vec2 {
         let x =
-            HEX_SIZE * (3f32.sqrt() * f32::from(self.q) + 3f32.sqrt() / 2f32 * f32::from(self.r));
+            HEX_SIZE * (3f32.sqrt() * f32::from(self.q) + (3f32.sqrt() / 2f32) * f32::from(self.r));
         let y = HEX_SIZE * (3f32 / 2f32 * f32::from(self.r));
         Vec2::new(x, y)
     }
@@ -480,7 +480,7 @@ impl HexPosition {
 
     pub(crate) fn dist(&self, other: HexPosition) -> i8 {
         let diff = *self - other;
-        (diff.q.abs()) + (diff.q + diff.r).abs() + (diff.r).abs() / 2
+        (diff.q.abs() + (diff.r).abs() + (diff.s()).abs()) / 2
     }
 }
 fn cube_round(frac: Vec3) -> Vec3 {
@@ -527,9 +527,57 @@ pub(crate) fn cube_linedraw(a: HexPosition, b: HexPosition) -> Vec<HexPosition> 
     line_vec
 }
 
+// pub const NE: HexPosition = HexPosition { q: 1, r: -1 };
+// pub const E: HexPosition = HexPosition { q: 1, r: 0 };
+// pub const SE: HexPosition = HexPosition { q: 0, r: 1 };
+// pub const SW: HexPosition = HexPosition { q: -1, r: 1 };
+// pub const W: HexPosition = HexPosition { q: -1, r: 0 };
+// pub const NW: HexPosition = HexPosition { q: 0, r: -1 };
+// pub const HEX_DIRECTIONS: [HexPosition; 6] = [NE, E, SE, SW, W, NW];
+
+pub(crate) fn hex_direction(a: HexPosition, b: HexPosition) -> HexDirection {
+    let n = a.dist(b) as f32;
+    if n == 0f32 {
+        return HexDirection::E;
+    }
+    let adj_pos = HexPosition::from_vec3(cube_round(cube_lerp(a, b, 1f32 / n)));
+    let delta = adj_pos - a;
+    dbg!(n);
+    dbg!(a);
+    dbg!(b);
+    dbg!(delta);
+    dbg!(adj_pos);
+    let dir = match delta {
+        NE => HexDirection::NE,
+        E => HexDirection::E,
+        SE => HexDirection::SE,
+        SW => HexDirection::SW,
+        W => HexDirection::W,
+        NW => HexDirection::NW,
+        _ => unreachable!(),
+    };
+    dbg!(&dir);
+    dir
+}
+
+#[test]
+fn get_direction() {}
+
 fn lerp_point(p0: Vec2, p1: Vec2, t: f32) -> Vec2 {
     Vec2 {
         x: lerp(p0.x, p1.x, t),
         y: lerp(p0.y, p1.y, t),
     }
+}
+
+#[cfg(test)]
+#[test]
+fn hex_position_to_pixel_math() {
+    let (q, r) = (3, 2);
+    let h = HexPosition::from_qr(q, r);
+    let correct_x = HEX_SIZE * (3f32.sqrt() * q as f32 + (3f32.sqrt() / 2f32) * r as f32);
+    let correct_y = HEX_SIZE * ((3f32 / 2f32) * r as f32);
+
+    assert_eq!(h.pixel_coords().x, correct_x);
+    assert_eq!(h.pixel_coords().y, correct_y);
 }

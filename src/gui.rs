@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 
 use crate::{
-    controls::{SelectedStructure, SpawnSelectedStructure},
+    controls::{CursorHexPosition, SelectedStructure, SpawnSelectedStructure},
     turrets::Structure,
 };
 
@@ -10,7 +10,14 @@ pub(crate) struct GuiPlugin;
 impl Plugin for GuiPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, gui_setup);
-        app.add_systems(Update, (show_selected_structure, show_to_spawn_structure));
+        app.add_systems(
+            Update,
+            (
+                show_selected_structure,
+                show_to_spawn_structure,
+                show_mouse_hex,
+            ),
+        );
     }
 }
 
@@ -20,6 +27,15 @@ struct FooterSelectedStructureText;
 #[derive(Bundle)]
 struct FooterSelectedStructureTextBundle {
     selected_structure: FooterSelectedStructureText,
+    text_bundle: TextBundle,
+}
+
+#[derive(Component)]
+struct FooterMousePosText;
+
+#[derive(Bundle)]
+struct FooterMousePosTextBundle {
+    mouse_pos: FooterMousePosText,
     text_bundle: TextBundle,
 }
 
@@ -41,7 +57,11 @@ fn gui_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                 display: Display::Grid,
                 width: Val::Percent(100.0),
                 height: Val::Percent(100.0),
-                grid_template_columns: vec![GridTrack::min_content(), GridTrack::flex(1.0)],
+                grid_template_columns: vec![
+                    GridTrack::min_content(),
+                    GridTrack::flex(1.0),
+                    GridTrack::flex(1.0),
+                ],
                 grid_template_rows: vec![
                     GridTrack::auto(),
                     GridTrack::flex(1.0),
@@ -90,6 +110,17 @@ fn gui_setup(mut commands: Commands, asset_server: Res<AssetServer>) {
                             },
                         ),
                     });
+                    builder.spawn(FooterMousePosTextBundle {
+                        mouse_pos: FooterMousePosText,
+                        text_bundle: TextBundle::from_section(
+                            "idk!!!",
+                            TextStyle {
+                                font: font.clone(),
+                                font_size: 24f32,
+                                ..default()
+                            },
+                        ),
+                    });
                 });
         });
 }
@@ -119,6 +150,15 @@ fn show_to_spawn_structure(
     mut q_footer_text: Query<&mut Text, With<FooterSpawnStructureText>>,
 ) {
     let new_text = selected_structure.string();
+    let mut footer_text = q_footer_text.single_mut();
+    footer_text.sections[0].value = new_text;
+}
+
+fn show_mouse_hex(
+    mouse_hex: Res<CursorHexPosition>,
+    mut q_footer_text: Query<&mut Text, With<FooterMousePosText>>,
+) {
+    let new_text = mouse_hex.gui_string();
     let mut footer_text = q_footer_text.single_mut();
     footer_text.sections[0].value = new_text;
 }

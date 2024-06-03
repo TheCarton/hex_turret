@@ -16,6 +16,7 @@ use crate::game::AppState;
 use crate::hex::cube_linedraw;
 use crate::hex::Hex;
 use crate::hex::HexControl;
+use crate::hex::HexDirection;
 use crate::hex::MIN_HEX_CONTROL;
 use crate::projectiles::spawn_projectile;
 use crate::projectiles::ProjectileType;
@@ -42,8 +43,7 @@ impl Plugin for TurretPlugin {
                 structure_faction_from_hex,
                 aim_turrets,
                 fire_turrets,
-                fire_control_ray,
-                decay_control_ray,
+                spawn_control_ray,
                 despawn_decayed_control_rays,
                 rotate_antennae,
                 update_factory_energy,
@@ -112,6 +112,7 @@ pub(crate) struct ControlRayBundle {
 #[derive(Bundle)]
 pub(crate) struct AntennaBundle {
     pub(crate) antenna: Antenna,
+    pub(crate) face: HexDirection,
     pub(crate) icon: StructureIcon,
     pub(crate) structure: Structure,
     pub(crate) health: Health,
@@ -129,6 +130,7 @@ impl Default for AntennaBundle {
     fn default() -> Self {
         AntennaBundle {
             icon: StructureIcon::FactoryIcon,
+            face: HexDirection::E,
             structure: Structure::Antenna,
             hittable: Hittable::default(),
             faction: HexFaction::Neutral,
@@ -144,31 +146,34 @@ impl Default for AntennaBundle {
     }
 }
 
-fn fire_control_ray(
-    mut q_antenna: Query<(&HexPosition, &mut ReloadTimer, &AimVec), (With<Antenna>, Without<Hex>)>,
-    q_hex: Query<&HexControl, (With<Hex>, Without<Antenna>)>,
+fn spawn_control_ray(
+    mut q_antenna: Query<
+        (&HexPosition, &HexDirection, &mut ReloadTimer),
+        (With<Antenna>, Without<Hex>),
+    >,
+    mut q_hex: Query<(Entity, &mut HexControl), (With<Hex>, Without<Antenna>)>,
     q_hex_map: Query<&HexMap>,
-    mut commands: Commands,
     time: Res<Time>,
 ) {
     let hex_map = q_hex_map.single();
-    for (start, mut reload, aim_vec) in q_antenna.iter_mut() {
-        if let Some(aim_point) = aim_vec.v {
-            reload.timer.tick(time.delta());
-            let hex_entity = hex_map.map.get(start).expect("start is valid hex");
-            let hex_control = q_hex.get(*hex_entity).expect("valid entity");
-            if reload.timer.finished() {
-                let end = HexPosition::from_pixel(aim_point);
-                commands.spawn(ControlRayBundle {
-                    control_vec: ControlVec {
-                        hexes: cube_linedraw(*start, end),
-                        control: *hex_control,
-                    },
-                    timer: RayTimer {
-                        timer: Timer::from_seconds(0.5f32, TimerMode::Once),
-                    },
-                    ..default()
-                });
+    for (antenna_pos, antenna_face, mut reload_timer) in q_antenna.iter_mut() {
+        let Ok((_, my_antenna_hc)) = q_hex.get(*hex_map.map.get(antenna_pos).expect("valid pos"))
+        else {
+            continue;
+        };
+        let antenna_hc = my_antenna_hc.clone();
+        reload_timer.timer.tick(time.delta());
+        if reload_timer.timer.finished() {
+            for i in 1..4 {
+                let hex_pos = antenna_face.to_hex() * i + *antenna_pos;
+                let Some(hex_entity) = hex_map.map.get(&hex_pos) else {
+                    break;
+                };
+                let (_, mut hc) = q_hex
+                    .get_mut(*hex_entity)
+                    .expect("valid entity from hex map");
+
+                *hc += antenna_hc;
             }
         }
     }
@@ -182,13 +187,6 @@ fn despawn_decayed_control_rays(
         if control_vec.control == MIN_HEX_CONTROL {
             commands.entity(control_entity).despawn();
         }
-    }
-}
-
-pub(crate) const CONTROL_RAY_DECAY: f32 = 5f32;
-fn decay_control_ray(mut q_rays: Query<&mut ControlVec, With<ControlRay>>) {
-    for mut ray in q_rays.iter_mut() {
-        ray.control -= CONTROL_RAY_DECAY;
     }
 }
 
@@ -435,14 +433,12 @@ fn fire_turrets(
     }
 }
 
-fn rotate_antennae(mut q_antennae: Query<(&mut Transform, &AimVec), With<Antenna>>) {
-    for (mut trans, maybe_aim_vec) in q_antennae.iter_mut() {
-        if let Some(aim_vec) = maybe_aim_vec.v {
-            if let Some(aim_point) = (aim_vec - trans.translation.truncate()).try_normalize() {
-                let rotate_to_aim = Quat::from_rotation_arc(Vec3::Y, aim_point.extend(0f32));
-                trans.rotation = rotate_to_aim;
-            }
-        }
+fn rotate_antennae(mut q_antennae: Query<(&mut Transform, &HexDirection), With<Antenna>>) {
+    for (mut trans, hex_direction) in q_antennae.iter_mut() {
+        let antenna_hex = HexPosition::from_pixel(trans.translation.truncate());
+        let aim_hex = antenna_hex + hex_direction.to_hex();
+        let rotate_to_aim = Quat::from_rotation_arc(Vec3::Y, aim_hex.pixel_coords().extend(0f32));
+        trans.rotation = rotate_to_aim;
     }
 }
 
