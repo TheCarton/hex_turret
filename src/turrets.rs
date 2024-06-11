@@ -6,6 +6,7 @@ use bevy_asset_loader::loading_state::LoadingStateAppExt;
 
 use crate::animation::AnimationIndices;
 use crate::animation::AnimationTimer;
+use crate::constants::HEX_DIRECTIONS;
 use crate::constants::PROJECTILE_SPEED;
 use crate::constants::TURRET_SIZE;
 use crate::controls::spawn_structure_on_click;
@@ -13,7 +14,7 @@ use crate::controls::SelectedStructure;
 use crate::enemies::Health;
 use crate::enemies::Hittable;
 use crate::game::AppState;
-use crate::hex::cube_linedraw;
+use crate::game::UpdateInGameSet;
 use crate::hex::Hex;
 use crate::hex::HexControl;
 use crate::hex::HexDirection;
@@ -35,6 +36,7 @@ impl Plugin for TurretPlugin {
             LoadingStateConfig::new(AppState::AssetLoading)
                 .load_collection::<TurretAssets>()
                 .load_collection::<AntennaAssets>()
+                .load_collection::<EnergySourceAssets>()
                 .load_collection::<FactoryAssets>(),
         )
         .add_systems(
@@ -47,9 +49,10 @@ impl Plugin for TurretPlugin {
                 despawn_decayed_control_rays,
                 rotate_antennae,
                 update_factory_energy,
+                generate_energy,
                 change_selected_structure_color.after(spawn_structure_on_click),
             )
-                .run_if(in_state(AppState::InGame)),
+                .in_set(UpdateInGameSet),
         );
     }
 }
@@ -107,6 +110,36 @@ pub(crate) struct ControlRayBundle {
     control_vec: ControlVec,
     velocity: HexPosition,
     timer: RayTimer,
+}
+
+#[derive(Component, Default)]
+pub(crate) struct EnergySource {
+    pub(crate) flow_rate: f32,
+}
+
+impl EnergySource {
+    fn to_hex_control(&self) -> HexControl {
+        HexControl {
+            red: 0f32,
+            blue: 0f32,
+            neutral: self.flow_rate,
+        }
+    }
+}
+
+#[derive(AssetCollection, Resource)]
+pub(crate) struct EnergySourceAssets {
+    #[asset(texture_atlas_layout(tile_size_x = 128., tile_size_y = 128., columns = 1, rows = 1))]
+    #[asset(path = "coil_gun_path_1.png")]
+    pub(crate) energy_source: Handle<Image>,
+}
+
+#[derive(Bundle)]
+pub(crate) struct EnergySourceBundle {
+    pub(crate) energy_source: EnergySource,
+    pub(crate) hex_pos: HexPosition,
+    pub(crate) spritebundle: SpriteBundle,
+    pub(crate) reload_timer: ReloadTimer,
 }
 
 #[derive(Bundle)]
@@ -174,6 +207,30 @@ fn spawn_control_ray(
                     .expect("valid entity from hex map");
 
                 *hc += antenna_hc;
+            }
+        }
+    }
+}
+
+fn generate_energy(
+    mut q_sources: Query<
+        (&EnergySource, &HexPosition, &mut ReloadTimer),
+        (With<EnergySource>, Without<Hex>),
+    >,
+    mut q_hex: Query<(Entity, &mut HexControl), (With<Hex>, Without<EnergySource>)>,
+    q_hex_map: Query<&HexMap>,
+    time: Res<Time>,
+) {
+    let hex_map = q_hex_map.single();
+    for (es, hex_pos, mut reload_timer) in q_sources.iter_mut() {
+        reload_timer.timer.tick(time.delta());
+        if reload_timer.timer.finished() {
+            for delta in HEX_DIRECTIONS {
+                let p = *hex_pos + delta;
+                if let Some(entity) = hex_map.map.get(&p) {
+                    let (_, mut hc) = q_hex.get_mut(*entity).expect("valid entity from hex map");
+                    *hc += es.to_hex_control();
+                }
             }
         }
     }
@@ -265,6 +322,7 @@ fn update_factory_energy(
 pub(crate) struct Turret;
 
 #[derive(Component, Default)]
+#[allow(dead_code)]
 pub(crate) enum StructureIcon {
     #[default]
     TurretIcon,
@@ -310,7 +368,6 @@ impl Default for TurretBundle {
 #[derive(AssetCollection, Resource)]
 pub(crate) struct FactoryAssets {
     #[asset(texture_atlas_layout(tile_size_x = 48., tile_size_y = 48., columns = 1, rows = 1))]
-    pub(crate) layout: Handle<TextureAtlasLayout>,
     #[asset(path = "firefly_factory_spritesheet.png")]
     pub(crate) factory: Handle<Image>,
 }
@@ -318,7 +375,6 @@ pub(crate) struct FactoryAssets {
 #[derive(AssetCollection, Resource)]
 pub(crate) struct AntennaAssets {
     #[asset(texture_atlas_layout(tile_size_x = 64., tile_size_y = 64., columns = 1, rows = 1))]
-    pub(crate) layout: Handle<TextureAtlasLayout>,
     #[asset(path = "antenna.png")]
     pub(crate) antenna: Handle<Image>,
 }
@@ -326,7 +382,6 @@ pub(crate) struct AntennaAssets {
 #[derive(AssetCollection, Resource)]
 pub(crate) struct TurretAssets {
     #[asset(texture_atlas_layout(tile_size_x = 64., tile_size_y = 64., columns = 1, rows = 1))]
-    pub(crate) layout: Handle<TextureAtlasLayout>,
     #[asset(path = "turret.png")]
     pub(crate) turret: Handle<Image>,
 }

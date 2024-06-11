@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use crate::{
     constants::PLAYER_SPEED,
     game::{EnterGameSet, FixedUpdateInGameSet, UpdateInGameSet},
-    hex::{Hex, HexControl, HexFaction, HexMap, HexPosition},
+    hex::{spawn_map, Hex, HexControl, HexFaction, HexMap, HexPosition},
 };
 
 pub(crate) struct PlayerPlugin;
@@ -16,6 +16,7 @@ impl Plugin for PlayerPlugin {
             Startup,
             (spawn_player, spawn_player_hex_control, apply_deferred)
                 .chain()
+                .after(spawn_map)
                 .in_set(EnterGameSet),
         );
         app.add_systems(Update, move_player.in_set(UpdateInGameSet));

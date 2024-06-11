@@ -11,6 +11,7 @@ use crate::constants::FIREFLY_BULLET_SCALE;
 use crate::constants::FIREFLY_RANGE;
 use crate::constants::PROJECTILE_SPEED;
 use crate::game::AppState;
+use crate::game::UpdateInGameSet;
 use crate::hex::Hex;
 use crate::hex::HexFaction;
 use crate::projectiles::spawn_projectile;
@@ -43,7 +44,7 @@ impl Plugin for EnemiesPlugin {
                 despawn_dead_mortals,
                 detect_enemy_player_collision,
             )
-                .run_if(in_state(AppState::InGame)),
+                .in_set(UpdateInGameSet),
         );
     }
 }

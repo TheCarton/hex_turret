@@ -17,11 +17,15 @@ pub(crate) enum AppState {
 }
 
 #[derive(States, Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[allow(dead_code)]
 pub(crate) enum PauseState {
     Paused,
     #[default]
     Running,
 }
+
+#[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) struct AssetLoadingSet;
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct EnterGameSet;

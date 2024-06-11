@@ -1,16 +1,16 @@
-use bevy::{ecs::query, prelude::*, window::PrimaryWindow};
+use bevy::{prelude::*, window::PrimaryWindow};
 
 use crate::{
     camera::MainCamera,
     constants::{ANTENNA_FIRE_RATE, ANTENNA_SIZE, FACTORY_SIZE, TURRET_HEALTH, TURRET_SIZE},
     enemies::{Health, Hittable},
-    game::{AppState, PauseState},
+    game::{PauseState, UpdateInGameSet},
     hex::{
         hex_direction, update_hexes, Hex, HexDirection, HexFaction, HexMap, HexPosition,
         HexStructure,
     },
     turrets::{
-        AimVec, Antenna, AntennaAssets, AntennaBundle, FactoryAssets, FactoryBundle, ReloadTimer,
+        Antenna, AntennaAssets, AntennaBundle, FactoryAssets, FactoryBundle, ReloadTimer,
         TurretAssets, TurretBundle,
     },
 };
@@ -33,7 +33,7 @@ impl Plugin for ControlPlugin {
                     select_spawn_structure,
                     select_structure,
                 )
-                    .run_if(in_state(AppState::InGame)),
+                    .in_set(UpdateInGameSet),
             );
     }
 }
@@ -56,6 +56,7 @@ impl CursorHexPosition {
 
 #[derive(Resource, Default, Copy, Clone)]
 pub(crate) struct SelectedStructure {
+    // stupid af fix this dumb shit
     pub(crate) curr_structure: Option<Entity>,
     pub(crate) prev_structure: Option<Entity>,
 }

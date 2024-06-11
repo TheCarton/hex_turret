@@ -13,7 +13,6 @@ mod gui;
 mod hex;
 mod player;
 mod projectiles;
-mod tools;
 mod turrets;
 
 fn main() {

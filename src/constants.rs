@@ -2,17 +2,9 @@ use crate::hex::HexPosition;
 use ::bevy::prelude::*;
 
 pub const HEX_SIZE: f32 = 32.0;
-pub const CONTROL_DECAY: f32 = 2.5f32;
 pub const RED_CONTROL_TARGET: f32 = 0f32;
 pub const BLUE_CONTROL_TARGET: f32 = 0f32;
-pub const NEUTRAL_CONTROL_TARGET: f32 = 0f32;
 pub const MAX_CONTROL_VALUE: f32 = 500f32;
-
-pub const TURRET_IMAGE_PATH: &str = "turret.png";
-pub const ANTENNA_IMAGE_PATH: &str = "antenna.png";
-pub const FACTORY_IMAGE_PATH: &str = "firefly_factory_spritesheet.png";
-pub const FIREFLY_IMAGE_PATH: &str = "firefly_spritesheet.png";
-pub const NO_STRUCTURE_IMAGE_PATH: &str = "no_structure_icon.png";
 
 pub const PLAYER_SPEED: f32 = 500.0;
 pub const PLAYER_SIZE: Vec2 = Vec2::new(28f32, 16f32);
@@ -20,7 +12,6 @@ pub const PLAYER_SIZE: Vec2 = Vec2::new(28f32, 16f32);
 pub const PROJECTILE_SPEED: f32 = PLAYER_SPEED * 2f32;
 pub const PROJECTILE_RANGE: f32 = HEX_SIZE * 8f32;
 pub const TURRET_BULLET_SIZE: Vec2 = Vec2::new(6f32, 8f32);
-pub const PROJECTILE_DAMAGE: f32 = 20f32;
 
 pub const FACTORY_SIZE: Vec2 = Vec2::new(48f32, 48f32);
 
@@ -38,16 +29,12 @@ pub const TURRET_HEALTH: f32 = 125f32;
 pub const TURRET_SIZE: Vec2 = Vec2::new(64f32, 64f32);
 
 pub const ANTENNA_FIRE_RATE: f32 = 0.15;
-pub const ANTENNA_RANGE: i8 = 4;
 pub const ANTENNA_SIZE: Vec2 = Vec2::new(55f32, 57f32);
-
-pub const TRIGGER_RANGE: f32 = HEX_SIZE;
 
 pub const FIREFLY_SPEED: f32 = PLAYER_SPEED / 2f32;
 pub const FIREFLY_HEALTH: f32 = 100f32;
 pub const FIREFLY_SIZE: Vec2 = Vec2::new(42f32, 38f32);
 
-pub const FIREFLY_HIT_ANIMATION_DURATION: f32 = 0.5f32;
 pub const FIREFLY_RANGE: f32 = HEX_SIZE * 1.5;
 
 pub const NE: HexPosition = HexPosition { q: 0, r: 1 };

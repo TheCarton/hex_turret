@@ -1,7 +1,4 @@
-use crate::constants::{
-    FIREFLY_BULLET_SIZE, FIREFLY_HIT_ANIMATION_DURATION, FIREFLY_SIZE, PROJECTILE_DAMAGE,
-    PROJECTILE_RANGE, PROJECTILE_SPEED, TURRET_BULLET_SIZE,
-};
+use crate::constants::{FIREFLY_BULLET_SIZE, PROJECTILE_RANGE, TURRET_BULLET_SIZE};
 use crate::enemies::{Health, Hit, Hittable};
 use crate::game::AppState;
 use crate::hex::HexPosition;
@@ -12,7 +9,6 @@ use bevy::prelude::*;
 use bevy_asset_loader::asset_collection::AssetCollection;
 use bevy_asset_loader::loading_state::config::{ConfigureLoadingState, LoadingStateConfig};
 use bevy_asset_loader::loading_state::LoadingStateAppExt;
-use derive_more::Add;
 
 pub(crate) struct ProjectilePlugin;
 
@@ -38,7 +34,6 @@ impl Plugin for ProjectilePlugin {
 #[derive(AssetCollection, Resource)]
 pub(crate) struct TurretProjectileAssets {
     #[asset(texture_atlas_layout(tile_size_x = 6., tile_size_y = 8., columns = 1, rows = 1))]
-    pub(crate) layout: Handle<TextureAtlasLayout>,
     #[asset(path = "turret_projectile.png")]
     pub(crate) projectile: Handle<Image>,
 }
@@ -46,7 +41,6 @@ pub(crate) struct TurretProjectileAssets {
 #[derive(AssetCollection, Resource)]
 pub(crate) struct FireflyProjectileAssets {
     #[asset(texture_atlas_layout(tile_size_x = 64., tile_size_y = 64., columns = 1, rows = 1))]
-    pub(crate) layout: Handle<TextureAtlasLayout>,
     #[asset(path = "firefly_projectile.png")]
     pub(crate) projectile: Handle<Image>,
 }

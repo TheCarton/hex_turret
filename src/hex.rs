@@ -1,37 +1,61 @@
-use bevy::{core_pipeline::tonemapping, prelude::*, reflect::Array};
+use bevy::prelude::*;
+use bevy_asset_loader::{
+    asset_collection::AssetCollection,
+    loading_state::{
+        config::{ConfigureLoadingState, LoadingStateConfig},
+        LoadingStateAppExt,
+    },
+};
 use derive_more::{Add, Sub};
-use itertools::Itertools;
 use std::{
     cmp::Ordering,
     collections::HashMap,
-    ops::{Add, AddAssign, Index, IndexMut, Mul, Sub, SubAssign},
+    ops::{Add, AddAssign, Index, IndexMut, Mul, Sub},
 };
-
-use rand::Rng;
 
 use crate::{
     colors,
     constants::{
-        BLUE_CONTROL_TARGET, CONTROL_DECAY, E, HEX_DIRECTIONS, HEX_SIZE, MAX_CONTROL_VALUE, NE, NW,
+        BLUE_CONTROL_TARGET, E, HEX_DIRECTIONS, HEX_SIZE, MAX_CONTROL_VALUE, NE, NW,
         RED_CONTROL_TARGET, SE, SW, W,
     },
-    turrets::{ControlRay, ControlVec},
+    game::{AppState, EnterGameSet, FixedUpdateInGameSet, UpdateInGameSet},
+    turrets::{
+        ControlRay, ControlVec, EnergySource, EnergySourceAssets, EnergySourceBundle, ReloadTimer,
+    },
 };
 
 pub struct HexPlugin;
 
 impl Plugin for HexPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, (spawn_map, apply_deferred, populate_map).chain());
+        app.configure_loading_state(
+            LoadingStateConfig::new(AppState::AssetLoading).load_collection::<HexAssets>(),
+        );
+        app.add_systems(
+            OnEnter(AppState::InGame),
+            (
+                spawn_map,
+                apply_deferred,
+                populate_map,
+                spawn_energy_sources,
+            )
+                .chain()
+                .in_set(EnterGameSet),
+        );
         app.add_systems(
             Update,
             (
                 update_hexes,
                 update_hex_control_from_control_rays,
                 change_hex_color,
-            ),
+            )
+                .in_set(UpdateInGameSet),
         );
-        app.add_systems(FixedUpdate, (diffuse_hex_control, decay_hex_control));
+        app.add_systems(
+            FixedUpdate,
+            (diffuse_hex_control, decay_hex_control).in_set(FixedUpdateInGameSet),
+        );
     }
 }
 
@@ -59,7 +83,35 @@ impl HexDirection {
     }
 }
 
-pub(crate) fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) {
+const ENERGY_SOURCE_FLOW_RATE: f32 = 100f32;
+const ENERGY_SOURCE_RELOAD_SECONDS: f32 = 5f32;
+
+fn spawn_energy_sources(
+    mut commands: Commands,
+    energy_source_texture_atlas: Res<EnergySourceAssets>,
+) {
+    let starting_pos = vec![HexPosition { q: -3, r: 2 }, HexPosition { q: 2, r: -3 }];
+    for pos in starting_pos {
+        let mut transform = Transform::from_xyz(pos.pixel_coords().x, pos.pixel_coords().y, 2f32);
+        transform.scale = Vec3::new(0.25f32, 0.25f32, 0.25f32);
+        commands.spawn(EnergySourceBundle {
+            energy_source: EnergySource {
+                flow_rate: ENERGY_SOURCE_FLOW_RATE,
+            },
+            reload_timer: ReloadTimer {
+                timer: Timer::from_seconds(ENERGY_SOURCE_RELOAD_SECONDS, TimerMode::Repeating),
+            },
+            hex_pos: pos,
+            spritebundle: SpriteBundle {
+                texture: energy_source_texture_atlas.energy_source.clone(),
+                transform,
+                ..default()
+            },
+        });
+    }
+}
+
+pub(crate) fn spawn_map(mut commands: Commands, hex_texture_atlas: Res<HexAssets>) {
     let size = 4;
     let physical_map_size = f32::from(size) * HEX_SIZE;
     let map = HashMap::new();
@@ -67,10 +119,6 @@ pub(crate) fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) 
         (-size..size).for_each(|r| acc.push(HexPosition::from_qr(q, r)));
         acc
     });
-    for h in &hex_positions {
-        dbg!(h);
-        dbg!(h.pixel_coords());
-    }
     commands.spawn((
         SpriteBundle {
             sprite: Sprite {
@@ -80,7 +128,7 @@ pub(crate) fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) 
             },
             ..default()
         },
-        HexMap { size, map },
+        HexMap { map },
     ));
     hex_positions.iter().for_each({
         |hex_pos| {
@@ -88,7 +136,7 @@ pub(crate) fn spawn_map(mut commands: Commands, asset_server: Res<AssetServer>) 
                 pos: *hex_pos,
                 status: HexFaction::Neutral,
                 sprite: SpriteBundle {
-                    texture: asset_server.load("blue_hex.png"),
+                    texture: hex_texture_atlas.hex.clone(),
                     transform: Transform::from_xyz(
                         hex_pos.pixel_coords().x,
                         hex_pos.pixel_coords().y,
@@ -145,6 +193,7 @@ fn diffuse_hex_control(mut q_hexes: Query<&mut HexControl, With<Hex>>, q_hex_map
 }
 
 pub(crate) fn populate_map(
+    //wtf
     mut q_parent: Query<&mut HexMap>,
     q_child: Query<(Entity, &HexPosition), With<Hex>>,
 ) {
@@ -196,15 +245,6 @@ fn change_hex_color(mut hex_query: Query<(&HexControl, &mut Sprite), With<Hex>>)
     }
 }
 
-pub(crate) fn random_hex(hex_map: &HexMap) -> HexPosition {
-    let mut rng = rand::thread_rng();
-    let q = rng.gen_range(-hex_map.size..hex_map.size);
-    let r = rng.gen_range(-hex_map.size..hex_map.size);
-    let h = HexPosition::from_qr(q, r);
-    assert!(hex_map.contains(h));
-    h
-}
-
 #[derive(Component, Default)]
 pub(crate) struct Hex;
 
@@ -217,10 +257,13 @@ impl HexStructure {
     pub(crate) fn from_id(id: Entity) -> HexStructure {
         HexStructure { entity: Some(id) }
     }
+}
 
-    pub(crate) fn no_structure() -> HexStructure {
-        HexStructure { entity: None }
-    }
+#[derive(AssetCollection, Resource)]
+pub(crate) struct HexAssets {
+    #[asset(texture_atlas_layout(tile_size_x = 64., tile_size_y = 64., columns = 1, rows = 1))]
+    #[asset(path = "blue_hex.png")]
+    pub(crate) hex: Handle<Image>,
 }
 
 #[derive(Bundle, Default)]
@@ -242,6 +285,7 @@ pub(crate) enum HexFaction {
 }
 
 impl HexFaction {
+    #[allow(dead_code)]
     fn into_iter() -> std::array::IntoIter<HexFaction, 3> {
         [
             HexFaction::Hostile,
@@ -258,11 +302,6 @@ pub(crate) const MIN_HEX_CONTROL: HexControl = HexControl {
     neutral: 0f32,
 };
 
-pub(crate) const MAX_HEX_CONTROL: HexControl = HexControl {
-    red: 500f32,
-    blue: 500f32,
-    neutral: 500f32,
-};
 #[derive(Component, Debug, Copy, Clone)]
 pub(crate) struct HexControl {
     pub(crate) red: f32,
@@ -274,6 +313,7 @@ impl HexControl {
     fn into_iter(&self) -> std::array::IntoIter<f32, 3> {
         [self.red, self.blue, self.neutral].into_iter()
     }
+    #[allow(dead_code)]
     fn into_iter_mut(&mut self) -> std::array::IntoIter<&mut f32, 3> {
         [&mut self.red, &mut self.blue, &mut self.neutral].into_iter()
     }
@@ -377,10 +417,6 @@ impl IndexMut<HexFaction> for HexControl {
 }
 
 impl HexControl {
-    pub(crate) fn len() -> usize {
-        3
-    }
-
     pub(crate) fn to_array(&self) -> [(HexFaction, f32); 3] {
         [
             (HexFaction::Hostile, self.red),
@@ -402,7 +438,6 @@ impl HexControl {
 #[derive(Component)]
 pub(crate) struct HexMap {
     //TODO: Better data structure for this. I'm iterating through these keys.
-    pub(crate) size: i8,
     pub(crate) map: HashMap<HexPosition, Entity>,
 }
 
@@ -465,10 +500,6 @@ impl HexPosition {
         }
     }
 
-    pub(crate) fn gui_label(&self) -> String {
-        format!("q: {}, r: {}, s: {}", self.q, self.r, self.s())
-    }
-
     pub(crate) fn neighbors(&self) -> [HexPosition; 6] {
         let mut neighbors = [*self; 6];
         for (n, d) in neighbors.iter_mut().zip(HEX_DIRECTIONS) {
@@ -513,6 +544,7 @@ fn cube_lerp(a: HexPosition, b: HexPosition, t: f32) -> Vec3 {
     Vec3::new(x, y, z)
 }
 
+#[allow(dead_code)]
 pub(crate) fn cube_linedraw(a: HexPosition, b: HexPosition) -> Vec<HexPosition> {
     let n = a.dist(b);
     let mut line_vec = Vec::with_capacity(n as usize);
@@ -527,14 +559,6 @@ pub(crate) fn cube_linedraw(a: HexPosition, b: HexPosition) -> Vec<HexPosition> 
     line_vec
 }
 
-// pub const NE: HexPosition = HexPosition { q: 1, r: -1 };
-// pub const E: HexPosition = HexPosition { q: 1, r: 0 };
-// pub const SE: HexPosition = HexPosition { q: 0, r: 1 };
-// pub const SW: HexPosition = HexPosition { q: -1, r: 1 };
-// pub const W: HexPosition = HexPosition { q: -1, r: 0 };
-// pub const NW: HexPosition = HexPosition { q: 0, r: -1 };
-// pub const HEX_DIRECTIONS: [HexPosition; 6] = [NE, E, SE, SW, W, NW];
-
 pub(crate) fn hex_direction(a: HexPosition, b: HexPosition) -> HexDirection {
     let n = a.dist(b) as f32;
     if n == 0f32 {
@@ -542,11 +566,6 @@ pub(crate) fn hex_direction(a: HexPosition, b: HexPosition) -> HexDirection {
     }
     let adj_pos = HexPosition::from_vec3(cube_round(cube_lerp(a, b, 1f32 / n)));
     let delta = adj_pos - a;
-    dbg!(n);
-    dbg!(a);
-    dbg!(b);
-    dbg!(delta);
-    dbg!(adj_pos);
     let dir = match delta {
         NE => HexDirection::NE,
         E => HexDirection::E,
@@ -556,13 +575,13 @@ pub(crate) fn hex_direction(a: HexPosition, b: HexPosition) -> HexDirection {
         NW => HexDirection::NW,
         _ => unreachable!(),
     };
-    dbg!(&dir);
     dir
 }
 
 #[test]
 fn get_direction() {}
 
+#[allow(dead_code)]
 fn lerp_point(p0: Vec2, p1: Vec2, t: f32) -> Vec2 {
     Vec2 {
         x: lerp(p0.x, p1.x, t),
