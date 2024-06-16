@@ -15,10 +15,7 @@ use std::{
 
 use crate::{
     colors,
-    constants::{
-        BLUE_CONTROL_TARGET, E, HEX_DIRECTIONS, HEX_SIZE, MAX_CONTROL_VALUE, NE, NW,
-        RED_CONTROL_TARGET, SE, SW, W,
-    },
+    constants::{E, HEX_DIRECTIONS, HEX_SIZE, MAX_CONTROL_VALUE, NE, NW, SE, SW, W},
     game::{AppState, EnterGameSet, FixedUpdateInGameSet, UpdateInGameSet},
     turrets::{
         ControlRay, ControlVec, EnergySource, EnergySourceAssets, EnergySourceBundle, ReloadTimer,
@@ -26,6 +23,8 @@ use crate::{
 };
 
 pub struct HexPlugin;
+
+const FIXED_UPDATE_INTERVAL: f64 = 1f64;
 
 impl Plugin for HexPlugin {
     fn build(&self, app: &mut App) {
@@ -52,11 +51,20 @@ impl Plugin for HexPlugin {
             )
                 .in_set(UpdateInGameSet),
         );
+        app.insert_resource(Time::<Fixed>::from_seconds(FIXED_UPDATE_INTERVAL));
+        app.insert_resource(DecayTimer {
+            timer: Timer::from_seconds(0.1f32, TimerMode::Repeating),
+        });
         app.add_systems(
             FixedUpdate,
             (diffuse_hex_control, decay_hex_control).in_set(FixedUpdateInGameSet),
         );
     }
+}
+
+#[derive(Resource)]
+struct DecayTimer {
+    timer: Timer,
 }
 
 #[derive(Component, Default, Debug)]
@@ -150,13 +158,25 @@ pub(crate) fn spawn_map(mut commands: Commands, hex_texture_atlas: Res<HexAssets
     });
 }
 
-fn decay_hex_control(mut hex_query: Query<&mut HexControl, With<Hex>>) {
-    for mut hex_control in hex_query.iter_mut() {
-        let new_red = lerp(hex_control.red, RED_CONTROL_TARGET, 0.25f32);
-        hex_control.red = new_red;
+const MIN_CONTROL: f32 = 0.1f32;
 
-        let new_blue = lerp(hex_control.blue, BLUE_CONTROL_TARGET, 0.25f32);
-        hex_control.blue = new_blue;
+fn decay_hex_control(
+    mut hex_query: Query<&mut HexControl, With<Hex>>,
+    mut decay_timer: ResMut<DecayTimer>,
+    time: Res<Time>,
+) {
+    decay_timer.timer.tick(time.delta());
+    if decay_timer.timer.finished() {
+        for mut hex_control in hex_query.iter_mut() {
+            for hex_faction in HexFaction::into_iter() {
+                let new_control = lerp(hex_control[hex_faction], 0f32, 0.25f32);
+                hex_control[hex_faction] = if new_control > MIN_CONTROL {
+                    new_control
+                } else {
+                    0f32
+                };
+            }
+        }
     }
 }
 
@@ -165,6 +185,7 @@ fn decay_hex_control(mut hex_query: Query<&mut HexControl, With<Hex>>) {
 // I wish I could tell them that there was no God, but they never believed in one to begin with.
 // I have to reaquaint them with the entire illusion of modernity just to disillusion them.
 
+const DIFFUSION_EFFICIENCY: f32 = 0.01f32;
 fn diffuse_hex_control(mut q_hexes: Query<&mut HexControl, With<Hex>>, q_hex_map: Query<&HexMap>) {
     let hex_map = q_hex_map.single();
     for (pos, entity) in hex_map.map.iter() {
@@ -178,13 +199,13 @@ fn diffuse_hex_control(mut q_hexes: Query<&mut HexControl, With<Hex>>, q_hex_map
             let hex_entities: [Entity; 2] = [*entity, *adj_entity];
             let [mut hex_control, mut adj_control] = q_hexes.many_mut(hex_entities);
             let prev_control = hex_control.clone();
-            for status_color in [HexFaction::Hostile, HexFaction::Friendly] {
+            for status_color in HexFaction::into_iter() {
                 if adj_control[status_color] < hex_control[status_color] {
                     let fraction_change = (prev_control[status_color] - adj_control[status_color])
                         / prev_control[status_color];
                     let max_share = 1f32 / (num_neighbors * 2f32);
                     let delta = prev_control[status_color] * max_share * fraction_change;
-                    adj_control[status_color] += delta;
+                    adj_control[status_color] += delta * DIFFUSION_EFFICIENCY;
                     hex_control[status_color] -= delta;
                 }
             }
@@ -285,7 +306,6 @@ pub(crate) enum HexFaction {
 }
 
 impl HexFaction {
-    #[allow(dead_code)]
     fn into_iter() -> std::array::IntoIter<HexFaction, 3> {
         [
             HexFaction::Hostile,

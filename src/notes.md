@@ -1,8 +1,5 @@
 bugs:
 
-an antenna placed on a black tile spawns a green control ray. why?
-
-
 neutral energy is created and is the only kind of energy that gets created
 red and blue energy is translated from neutral energy
 

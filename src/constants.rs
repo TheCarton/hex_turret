@@ -2,8 +2,6 @@ use crate::hex::HexPosition;
 use ::bevy::prelude::*;
 
 pub const HEX_SIZE: f32 = 32.0;
-pub const RED_CONTROL_TARGET: f32 = 0f32;
-pub const BLUE_CONTROL_TARGET: f32 = 0f32;
 pub const MAX_CONTROL_VALUE: f32 = 500f32;
 
 pub const PLAYER_SPEED: f32 = 500.0;
